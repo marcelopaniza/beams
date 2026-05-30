@@ -1,6 +1,6 @@
-# buses channel
+# beams channel
 
-**Experimental, opt-in.** Real-time bridge that pushes bus messages into an
+**Experimental, opt-in.** Real-time bridge that pushes beam messages into an
 already-open Claude Code session so Claude wakes and reacts, without you
 having to type anything.
 
@@ -9,14 +9,14 @@ having to type anything.
 One-line architecture:
 
 ```
-watcher daemon  --on-message-->  curl localhost  -->  buses-channel.mjs  -->  <channel> event  -->  Claude wakes
+watcher daemon  --on-message-->  curl localhost  -->  beams-channel.mjs  -->  <channel> event  -->  Claude wakes
 ```
 
-`buses-channel.mjs` is an MCP stdio server.  Claude Code spawns it as a
-subprocess at startup.  When the buses watcher fires its `--on-message` hook
+`beams-channel.mjs` is an MCP stdio server.  Claude Code spawns it as a
+subprocess at startup.  When the beams watcher fires its `--on-message` hook
 for a new message, the hook POSTs to the server's local HTTP listener.  The
 server emits a `notifications/claude/channel` JSON-RPC notification over
-stdout, which Claude Code wraps in a `<channel source="buses" ...>` tag and
+stdout, which Claude Code wraps in a `<channel source="beams" ...>` tag and
 delivers as a new turn.
 
 Events only arrive while the session is **open**.  If Claude Code isn't
@@ -48,14 +48,14 @@ cp channel/.mcp.json.example .mcp.json
 ```
 
 Or, to register it user-wide (so it works from any project directory), merge
-the `buses` entry into `~/.claude.json` using the **absolute** path:
+the `beams` entry into `~/.claude.json` using the **absolute** path:
 
 ```json
 {
   "mcpServers": {
-    "buses": {
+    "beams": {
       "command": "node",
-      "args": ["/absolute/path/to/channel/buses-channel.mjs"]
+      "args": ["/absolute/path/to/channel/beams-channel.mjs"]
     }
   }
 }
@@ -72,10 +72,10 @@ launching `claude`, so the spawned server process and the watcher's
 `--on-message` hook inherit the same value from the shell environment:
 
 ```bash
-export BUSES_CHANNEL_TOKEN=$(openssl rand -hex 16)
+export BEAMS_CHANNEL_TOKEN=$(openssl rand -hex 16)
 ```
 
-Alternatively, point `BUSES_CHANNEL_TOKEN_FILE` at a path.  If the file is
+Alternatively, point `BEAMS_CHANNEL_TOKEN_FILE` at a path.  If the file is
 missing the server generates a random token, writes it there at mode 0600,
 and logs the path (never the value) to stderr.
 
@@ -86,15 +86,15 @@ local development where you trust every process running as your UID.
 ### 3. Launch Claude Code with the development flag
 
 Community-marketplace plugins are not on Anthropic's channel allowlist.
-Until the buses channel is officially listed, you must pass
+Until the beams channel is officially listed, you must pass
 `--dangerously-load-development-channels` to bypass the allowlist check for
 this specific server entry:
 
 ```bash
-claude --dangerously-load-development-channels server:buses
+claude --dangerously-load-development-channels server:beams
 ```
 
-The `server:buses` argument names the MCP server entry as registered in your
+The `server:beams` argument names the MCP server entry as registered in your
 `.mcp.json` or `~/.claude.json`.  This flag bypasses the allowlist only — it
 does not disable org policy (`channelsEnabled`), and it does not affect other
 `--channels` entries.  The server itself is localhost-only; no external
@@ -104,23 +104,23 @@ network exposure is involved.
 
 Start the watcher with an `--on-message` hook that POSTs each new message to
 the channel server.  Run this inside your Claude Code session (or in a shell
-that has `BUSES_CHANNEL_TOKEN` set):
+that has `BEAMS_CHANNEL_TOKEN` set):
 
 ```
-/buses:watch start --on-message 'curl -s -m 5 -X POST -H "x-buses-token: $BUSES_CHANNEL_TOKEN" -H "x-buses-bus: $BUSES_BUS" -H "x-buses-from: $BUSES_FROM" --data-binary "$BUSES_PREVIEW" http://127.0.0.1:${BUSES_CHANNEL_PORT:-8799}/ >/dev/null 2>&1 || true'
+/beams:watch start --on-message 'curl -s -m 5 -X POST -H "x-beams-token: $BEAMS_CHANNEL_TOKEN" -H "x-beams-beam: $BEAMS_BEAM" -H "x-beams-from: $BEAMS_FROM" --data-binary "$BEAMS_PREVIEW" http://127.0.0.1:${BEAMS_CHANNEL_PORT:-8799}/ >/dev/null 2>&1 || true'
 ```
 
 The watcher exports three variables per message before running `--on-message`:
 
 | Variable | Contents |
 |---|---|
-| `BUSES_BUS` | Bus name the message arrived on |
-| `BUSES_FROM` | Sender's friendly name |
-| `BUSES_PREVIEW` | First ~200 chars of the message body |
+| `BEAMS_BEAM` | Beam name the message arrived on |
+| `BEAMS_FROM` | Sender's friendly name |
+| `BEAMS_PREVIEW` | First 120 chars of the message body |
 
-`BUSES_CHANNEL_TOKEN` is inherited from the shell that launched the watcher
-(same shell where you ran `export BUSES_CHANNEL_TOKEN=...` in step 2).
-`BUSES_CHANNEL_PORT` defaults to 8799 if unset; the `${:-8799}` expansion
+`BEAMS_CHANNEL_TOKEN` is inherited from the shell that launched the watcher
+(same shell where you ran `export BEAMS_CHANNEL_TOKEN=...` in step 2).
+`BEAMS_CHANNEL_PORT` defaults to 8799 if unset; the `${:-8799}` expansion
 in the curl command matches.
 
 The `|| true` at the end prevents the watcher daemon from treating a failed
@@ -131,9 +131,9 @@ curl (e.g. server not yet up) as an error.
 **Localhost-only bind** — the HTTP listener binds to `127.0.0.1`, never
 `0.0.0.0`.  No external network exposure, no firewall rule required.
 
-**Token gate** — buses' threat model treats same-UID local processes as
+**Token gate** — beams' threat model treats same-UID local processes as
 potentially hostile (a malicious dependency running as your user can reach
-localhost).  A shared token in `x-buses-token` is required by default.  The
+localhost).  A shared token in `x-beams-token` is required by default.  The
 comparison uses `crypto.timingSafeEqual` to resist timing attacks.  If no
 token is configured, the server accepts localhost POSTs and warns once on
 stderr.
@@ -141,15 +141,15 @@ stderr.
 **Content sanitization** — message bodies are stripped of C0 control
 characters (0x00–0x1f), DEL (0x7f), and C1 controls (0x80–0x9f) before being
 forwarded to Claude.  This guards against prompt-injection via crafted message
-bodies and terminal-hijack sequences.  The meta values (`bus`, `from`) are
+bodies and terminal-hijack sequences.  The meta values (`beam`, `from`) are
 additionally restricted to `[A-Za-z0-9_]` only, matching the Channels spec's
 identifier constraint.
 
 **This is a prompt-injection surface** — anyone who can POST to the channel
-server can put text in front of Claude.  The token guards that.  The bus
-messages themselves are already Ed25519-signed and validated by buses before
+server can put text in front of Claude.  The token guards that.  The beam
+messages themselves are already Ed25519-signed and validated by beams before
 the watcher ever fires `--on-message`, so the content you POST is attacker-
-controlled only if the buses layer is already compromised.
+controlled only if the beams layer is already compromised.
 
 ## Verify it works
 
@@ -161,20 +161,20 @@ curl -s http://127.0.0.1:8799/health
 
 # Send a test event — Claude should wake and surface the message
 curl -X POST \
-  -H "x-buses-token: $BUSES_CHANNEL_TOKEN" \
-  -H "x-buses-bus: test" \
-  -H "x-buses-from: smoke" \
+  -H "x-beams-token: $BEAMS_CHANNEL_TOKEN" \
+  -H "x-beams-beam: test" \
+  -H "x-beams-from: smoke" \
   --data-binary "hello from the channel smoke test" \
   http://127.0.0.1:8799/
 ```
 
-Watch your Claude Code terminal — it should show a `<channel source="buses"
-bus="test" from="smoke">` event and Claude will surface the message.
+Watch your Claude Code terminal — it should show a `<channel source="beams"
+beam="test" from="smoke">` event and Claude will surface the message.
 
-To change the port, set `BUSES_CHANNEL_PORT` before launching `claude` (the
+To change the port, set `BEAMS_CHANNEL_PORT` before launching `claude` (the
 spawned server inherits it):
 
 ```bash
-export BUSES_CHANNEL_PORT=9100
-claude --dangerously-load-development-channels server:buses
+export BEAMS_CHANNEL_PORT=9100
+claude --dangerously-load-development-channels server:beams
 ```

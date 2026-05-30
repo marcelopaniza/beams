@@ -1,37 +1,37 @@
 #!/usr/bin/env bash
-# /buses:require-signatures <bus> on|off
+# /beams:require-signatures <beam> on|off
 #
-# Driver-only. Set the per-bus `require_signatures` flag in the manifest.
+# Driver-only. Set the per-beam `require_signatures` flag in the manifest.
 # When ON: msg_validate rejects any message from a sender whose member
 # record lacks a `public_key` field — closing the migration window where
 # unsigned messages from no-pubkey-published senders are accepted.
 #
-# Use this once every active rider in a bus has run a /buses:join under
+# Use this once every active rider in a beam has run a /beams:join under
 # v0.5+ (so their pubkey is published). After that, unsigned messages from
 # pretend identities created on the share can no longer slip through.
 
 set -euo pipefail
 source "$(cd "$(dirname "$0")" && pwd)/common.sh"
-buses::require jq
-buses::config_require
+beams::require jq
+beams::config_require
 
-[ "$#" -le 1 ] && { read -ra __buses_args <<<"${1-}"; set -- "${__buses_args[@]}"; unset __buses_args; }
+[ "$#" -le 1 ] && { read -ra __beams_args <<<"${1-}"; set -- "${__beams_args[@]}"; unset __beams_args; }
 
-bus="${1:-}"
+beam="${1:-}"
 mode="${2:-}"
-[ -n "$bus" ] && [ -n "$mode" ] || buses::die "usage: require-signatures.sh <bus> on|off"
-buses::bus_exists "$bus" || buses::die "bus '$bus' does not exist"
-buses::is_driver "$bus"  || buses::die "only the driver of '$bus' can change the signature policy"
+[ -n "$beam" ] && [ -n "$mode" ] || beams::die "usage: require-signatures.sh <beam> on|off"
+beams::beam_exists "$beam" || beams::die "beam '$beam' does not exist"
+beams::is_driver "$beam"  || beams::die "only the driver of '$beam' can change the signature policy"
 
 case "$mode" in
   on|true|1)  val=true  ;;
   off|false|0) val=false ;;
-  *) buses::die "mode must be 'on' or 'off' (got: $mode)" ;;
+  *) beams::die "mode must be 'on' or 'off' (got: $mode)" ;;
 esac
 
-buses::manifest_set "$bus" '.require_signatures = $v' --argjson v "$val"
+beams::manifest_set "$beam" '.require_signatures = $v' --argjson v "$val"
 if [ "$val" = "true" ]; then
-  printf 'buses: bus "%s" now REQUIRES signed messages — riders without published pubkeys will be silently dropped.\n' "$bus"
+  printf 'beams: beam "%s" now REQUIRES signed messages — riders without published pubkeys will be silently dropped.\n' "$beam"
 else
-  printf 'buses: bus "%s" — signature requirement disabled. Unsigned messages from no-pubkey peers will be accepted (migration mode).\n' "$bus"
+  printf 'beams: beam "%s" — signature requirement disabled. Unsigned messages from no-pubkey peers will be accepted (migration mode).\n' "$beam"
 fi

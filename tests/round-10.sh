@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Regression test for the /buses:send slash-command injection bug.
+# Regression test for the /beams:send slash-command injection bug.
 #
 # Bug: commands/send.md invoked lib/send.sh as `"$LIB/send.sh" "$ARGUMENTS"`.
 # Claude Code substitutes $ARGUMENTS at .md-template time, BEFORE bash parses
@@ -15,13 +15,13 @@
 # This test simulates Claude Code's substitution by reading the !-block of
 # commands/send.md, splicing the malicious payload into the $ARGUMENTS token,
 # and bash-exec'ing the result. It asserts (a) no side-effect marker file
-# was created, and (b) the message body stored on the bus equals the
+# was created, and (b) the message body stored on the beam equals the
 # literal attacker payload.
 
 set -euo pipefail
 
 PLUGIN="${PLUGIN_ROOT:-$(cd "$(dirname "$0")/.." && pwd)}"
-TEST_TMPDIR=$(mktemp -d /tmp/buses-test-r10.XXXXXX)
+TEST_TMPDIR=$(mktemp -d /tmp/beams-test-r10.XXXXXX)
 SHARED="$TEST_TMPDIR/share"
 CFG_A="$TEST_TMPDIR/cfg-a"
 CFG_B="$TEST_TMPDIR/cfg-b"
@@ -39,8 +39,8 @@ cleanup() {
 }
 trap cleanup EXIT
 
-as_a() { ( export BUSES_CONFIG_DIR="$CFG_A"; "$PLUGIN/lib/$1.sh" "${@:2}" ); }
-as_b() { ( export BUSES_CONFIG_DIR="$CFG_B"; "$PLUGIN/lib/$1.sh" "${@:2}" ); }
+as_a() { ( export BEAMS_CONFIG_DIR="$CFG_A"; "$PLUGIN/lib/$1.sh" "${@:2}" ); }
+as_b() { ( export BEAMS_CONFIG_DIR="$CFG_B"; "$PLUGIN/lib/$1.sh" "${@:2}" ); }
 
 # ----------------------------------------------------------------------------
 banner "1. set up two sessions on a fresh shared dir"
@@ -52,7 +52,7 @@ as_b name "bob"   >/dev/null
 as_a create general >/dev/null
 as_a join   general >/dev/null
 as_b join   general >/dev/null
-pass "alice and bob both on bus 'general'"
+pass "alice and bob both on beam 'general'"
 
 # ----------------------------------------------------------------------------
 banner "2. extract the !-block from commands/send.md"
@@ -84,7 +84,7 @@ substituted="${slash_block//\$ARGUMENTS/$ATTACKER_ARGS}"
 # Run as alice. CLAUDE_PLUGIN_ROOT is what the !-block uses to find send.sh.
 rm -f "$MARKER" "$MARKER_BT"
 (
-  export BUSES_CONFIG_DIR="$CFG_A"
+  export BEAMS_CONFIG_DIR="$CFG_A"
   export CLAUDE_PLUGIN_ROOT="$PLUGIN"
   bash -c "$substituted"
 ) >"$TEST_TMPDIR/send.out" 2>"$TEST_TMPDIR/send.err" || {
@@ -111,8 +111,8 @@ pass "no marker files; \$() and backticks were NOT expanded"
 
 # ----------------------------------------------------------------------------
 banner "6. ASSERT message body stored verbatim"
-msg_file=$(find "$SHARED/buses/general/messages" -name '*.msg' -type f 2>/dev/null | head -1)
-[ -n "$msg_file" ] || fail "no message file landed on the bus"
+msg_file=$(find "$SHARED/beams/general/messages" -name '*.msg' -type f 2>/dev/null | head -1)
+[ -n "$msg_file" ] || fail "no message file landed on the beam"
 # Pull body (everything after the second `---` line)
 body=$(awk '
   /^---$/ { dashes++; next }

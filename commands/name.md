@@ -5,9 +5,9 @@ allowed-tools: ["Bash(${CLAUDE_PLUGIN_ROOT}/lib/name.sh:*)"]
 ---
 
 ```!
-"${CLAUDE_PLUGIN_ROOT}/lib/name.sh" "$(cat <<'BUSES_END_PAYLOAD_3f5a8c2d1b9e7f0a'
+"${CLAUDE_PLUGIN_ROOT}/lib/name.sh" "$(cat <<'BEAMS_END_PAYLOAD_3f5a8c2d1b9e7f0a'
 $ARGUMENTS
-BUSES_END_PAYLOAD_3f5a8c2d1b9e7f0a
+BEAMS_END_PAYLOAD_3f5a8c2d1b9e7f0a
 )"
 ```
 

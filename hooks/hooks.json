@@ -1,5 +1,5 @@
 {
-  "description": "buses plugin: proactive delivery of cross-terminal messages — pull-on-prompt (UserPromptSubmit), surface-on-boot (SessionStart), and opt-in active-session sustain (Stop)",
+  "description": "beams plugin: proactive delivery of cross-terminal messages — pull-on-prompt (UserPromptSubmit), surface-on-boot (SessionStart), and opt-in active-session sustain (Stop)",
   "hooks": {
     "UserPromptSubmit": [
       {

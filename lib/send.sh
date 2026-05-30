@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Write a single message file into a bus, atomically.
-# Usage: send.sh <bus> <to> <body...>
+# Write a single message file into a beam, atomically.
+# Usage: send.sh <beam> <to> <body...>
 #
 # <to> can be:
 #   all                       broadcast to every subscriber
@@ -12,14 +12,14 @@
 
 set -euo pipefail
 source "$(cd "$(dirname "$0")" && pwd)/common.sh"
-buses::require jq
-buses::config_require
+beams::require jq
+beams::config_require
 
-# --from-stdin mode: the /buses:send slash command pipes $ARGUMENTS via a
+# --from-stdin mode: the /beams:send slash command pipes $ARGUMENTS via a
 # heredoc with a single-quoted delimiter, so the host shell does NOT expand
 # $(...) or backticks inside the user's message body. We parse the payload
 # here, where no further bash evaluation can occur, then fall through to the
-# regular flow with bus/to/body set as positional args.
+# regular flow with beam/to/body set as positional args.
 #
 # Why this matters: the previous slash-command shape was
 #   "${CLAUDE_PLUGIN_ROOT}/lib/send.sh" "$ARGUMENTS"
@@ -38,7 +38,7 @@ if [ "${1:-}" = "--from-stdin" ]; then
   # so the body is byte-equal to what the user typed.
   payload=${payload%$'\n'}
 
-  # bus + to live on the first physical line; body is the rest of that
+  # beam + to live on the first physical line; body is the rest of that
   # line plus every subsequent line. read -r preserves backslashes.
   if [[ "$payload" == *$'\n'* ]]; then
     first_line=${payload%%$'\n'*}
@@ -47,39 +47,39 @@ if [ "${1:-}" = "--from-stdin" ]; then
     first_line="$payload"
     rest_lines=""
   fi
-  read -r bus to body_head <<< "$first_line"
+  read -r beam to body_head <<< "$first_line"
   body="${body_head:-}"
   [ -n "$rest_lines" ] && body="${body}"$'\n'"$rest_lines"
 
-  set -- "${bus:-}" "${to:-}" "${body:-}"
+  set -- "${beam:-}" "${to:-}" "${body:-}"
 fi
 
 # Legacy single-string callers (older slash-command shape, ad-hoc shell
 # invocations): collapse a single positional arg into whitespace-split
-# tokens. Direct CLI / bin/buses callers (and the --from-stdin branch
+# tokens. Direct CLI / bin/beams callers (and the --from-stdin branch
 # above) all arrive with $# > 1, so this is a no-op for them.
-[ "$#" -le 1 ] && { read -ra __buses_args <<<"${1-}"; set -- "${__buses_args[@]}"; unset __buses_args; }
+[ "$#" -le 1 ] && { read -ra __beams_args <<<"${1-}"; set -- "${__beams_args[@]}"; unset __beams_args; }
 
-bus="${1:-}"; shift || true
+beam="${1:-}"; shift || true
 to="${1:-}";  shift || true
 body="$*"
 
-[ -n "$bus" ]  || buses::die "usage: send.sh <bus> <to> <body...>"
-[ -n "$to" ]   || buses::die "missing <to> (use 'all' to broadcast)"
-[ -n "$body" ] || buses::die "empty message body"
+[ -n "$beam" ]  || beams::die "usage: send.sh <beam> <to> <body...>"
+[ -n "$to" ]   || beams::die "missing <to> (use 'all' to broadcast)"
+[ -n "$body" ] || beams::die "empty message body"
 
-buses::valid_name "$bus" || buses::die "invalid bus name: $bus"
-buses::bus_exists "$bus" || buses::die "bus '$bus' does not exist on the shared folder"
+beams::valid_name "$beam" || beams::die "invalid beam name: $beam"
+beams::beam_exists "$beam" || beams::die "beam '$beam' does not exist on the shared folder"
 
-# Banlist gate: refuse if our session has been kicked from this bus.
-if buses::is_banned "$bus"; then
-  buses::die "you have been kicked from bus '$bus' — ask the driver to /buses:unkick you"
+# Banlist gate: refuse if our session has been kicked from this beam.
+if beams::is_banned "$beam"; then
+  beams::die "you have been kicked from beam '$beam' — ask the driver to /beams:unkick you"
 fi
 
 # Lock gate: refuse if locked, unless we are the driver.
-if buses::is_locked "$bus" && ! buses::is_driver "$bus"; then
-  reason=$(buses::lock_reason "$bus")
-  buses::die "bus '$bus' is locked${reason:+ ($reason)} — only the driver can send"
+if beams::is_locked "$beam" && ! beams::is_driver "$beam"; then
+  reason=$(beams::lock_reason "$beam")
+  beams::die "beam '$beam' is locked${reason:+ ($reason)} — only the driver can send"
 fi
 
 # Normalise the `to` field: split on commas, trim whitespace, drop empties.
@@ -90,13 +90,13 @@ to_normalised=$(printf '%s' "$to" \
   | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' \
   | grep -v '^$' \
   | paste -sd ',' -)
-[ -n "$to_normalised" ] || buses::die "no valid recipients after normalising '$to'"
+[ -n "$to_normalised" ] || beams::die "no valid recipients after normalising '$to'"
 
 # Single-recipient back-compat: only when there's exactly one non-'all' name.
 # Look up its UUID so receivers with name collisions can still disambiguate.
 to_id=""
 if [[ "$to_normalised" != *,* ]] && [ "$to_normalised" != "all" ]; then
-  members_dir=$(buses::bus_members "$bus")
+  members_dir=$(beams::beam_members "$beam")
   if [ -d "$members_dir" ]; then
     while IFS= read -r f; do
       [ -f "$f" ] || continue
@@ -111,16 +111,16 @@ if [[ "$to_normalised" != *,* ]] && [ "$to_normalised" != "all" ]; then
 fi
 
 # Delegate file build + sign + atomic write to the shared helper.
-result=$(buses::write_message "$bus" "$to_normalised" "$body" "$to_id") \
-  || buses::die "send failed (check openssl install)"
+result=$(beams::write_message "$beam" "$to_normalised" "$body" "$to_id") \
+  || beams::die "send failed (check openssl install)"
 fname="${result% *}"
 mid="${result##* }"
 
 # Refresh our presence (best effort).
-buses::write_member_record "$bus" >/dev/null 2>&1 || true
+beams::write_member_record "$beam" >/dev/null 2>&1 || true
 
 # Echo back any @-mentions in the body as a usability cue.
 mentions=$(printf '%s' "$body" | { grep -oE '@[A-Za-z0-9._-]+' || true; } \
                                 | sort -u | paste -sd ' ' -)
 printf 'sent: %s/%s  to=%s%s  (id=%s)\n' \
-  "$bus" "$fname" "$to_normalised" "${mentions:+  mentions=$mentions}" "$mid"
+  "$beam" "$fname" "$to_normalised" "${mentions:+  mentions=$mentions}" "$mid"

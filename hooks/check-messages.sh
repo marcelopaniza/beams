@@ -5,26 +5,26 @@
 # case and never blocks the user's prompt.
 #
 # Fast path: when nothing has changed since the last hook fire (config file
-# unmodified AND every subscribed bus's messages/ dir has the same mtime as
-# last time AND the cached bus list matches the live config), skip the full
+# unmodified AND every subscribed beam's messages/ dir has the same mtime as
+# last time AND the cached beam list matches the live config), skip the full
 # check.sh entirely. A cached fingerprint lives at
-# $BUSES_CONFIG_DIR/state/hook-mtime-stash.
+# $BEAMS_CONFIG_DIR/state/hook-mtime-stash.
 #
 # Security model. The stash is trust-but-verify cache: a same-UID peer who
-# can write to $BUSES_CONFIG_DIR is hostile by design (see threat model).
+# can write to $BEAMS_CONFIG_DIR is hostile by design (see threat model).
 # Two hardening measures:
 #   (1) per-process tmp via mktemp on the slow-path stash refresh — prevents
 #       a peer from planting a fixed-name `.tmp` symlink that would redirect
 #       our write to an attacker-chosen victim file.
-#   (2) the fast path cross-checks the cached bus list against `jq .buses`
+#   (2) the fast path cross-checks the cached beam list against `jq .beams`
 #       from the live config — without this, a peer who forges a stash with
-#       only a subset of buses (or none at all) can silently censor messages
-#       on the omitted buses until the victim happens to modify config.
+#       only a subset of beams (or none at all) can silently censor messages
+#       on the omitted beams until the victim happens to modify config.
 #
 # Stash format (one key=value per line):
 #   cfg=<config_mtime>
 #   shared=<shared_path>
-#   b=<bus_name>=<messages_dir_mtime>
+#   b=<beam_name>=<messages_dir_mtime>
 #   ...
 #
 # Worst case under stale / forged stash: one redundant slow-path run. Any
@@ -45,9 +45,9 @@ cat >/dev/null 2>&1 || true
   # Resolve config dir the same way common.sh does (explicit override beats
   # global default). We can't source common.sh without paying its startup
   # cost, so reproduce the minimum needed.
-  buses_config_dir="${BUSES_CONFIG_DIR:-${XDG_CONFIG_HOME:-$HOME/.config}/buses}"
-  cfg="$buses_config_dir/config.json"
-  state_dir="$buses_config_dir/state"
+  beams_config_dir="${BEAMS_CONFIG_DIR:-${XDG_CONFIG_HOME:-$HOME/.config}/beams}"
+  cfg="$beams_config_dir/config.json"
+  state_dir="$beams_config_dir/state"
   stash="$state_dir/hook-mtime-stash"
 
   # If state_dir is itself a symlink, refuse stash operations — a peer who
@@ -66,7 +66,7 @@ cat >/dev/null 2>&1 || true
     if [ -f "$stash" ] && [ ! -L "$stash" ]; then
       stash_cfg=""
       stash_shared=""
-      stash_buses=()
+      stash_beams=()
       stash_mtimes=()
       while IFS= read -r line; do
         case "$line" in
@@ -77,37 +77,37 @@ cat >/dev/null 2>&1 || true
             bname="${rest%=*}"
             bmtime="${rest##*=}"
             [ -n "$bname" ] || continue
-            stash_buses+=("$bname")
+            stash_beams+=("$bname")
             stash_mtimes+=("$bmtime")
             ;;
         esac
       done < "$stash"
 
       if [ "$stash_cfg" = "$cfg_mtime" ] && [ -n "$stash_shared" ]; then
-        # Cross-check stash bus list against authoritative config. Without
+        # Cross-check stash beam list against authoritative config. Without
         # this, a peer who plants a curated stash (omitting `b=` lines for
-        # a target bus, or all buses) can silently censor those messages
+        # a target beam, or all beams) can silently censor those messages
         # because the fast path's all_match=1 would otherwise be vacuously
-        # true on an empty/forged bus list. One jq call here is cheap vs
+        # true on an empty/forged beam list. One jq call here is cheap vs
         # the full slow path it replaces.
-        expected_buses=$(jq -r '.buses[]? // empty' "$cfg" 2>/dev/null \
+        expected_beams=$(jq -r '.beams[]? // empty' "$cfg" 2>/dev/null \
                          | LC_ALL=C sort)
-        got_buses=""
-        if [ "${#stash_buses[@]}" -gt 0 ]; then
-          got_buses=$(printf '%s\n' "${stash_buses[@]}" | LC_ALL=C sort)
+        got_beams=""
+        if [ "${#stash_beams[@]}" -gt 0 ]; then
+          got_beams=$(printf '%s\n' "${stash_beams[@]}" | LC_ALL=C sort)
         fi
 
-        if [ "$expected_buses" = "$got_buses" ]; then
-          if [ -z "$expected_buses" ]; then
-            # No subscribed buses; nothing to deliver, no slow path needed.
+        if [ "$expected_beams" = "$got_beams" ]; then
+          if [ -z "$expected_beams" ]; then
+            # No subscribed beams; nothing to deliver, no slow path needed.
             exit 0
           fi
-          # Stash bus list matches config — now stat each bus messages dir.
+          # Stash beam list matches config — now stat each beam messages dir.
           all_match=1
-          for i in "${!stash_buses[@]}"; do
-            b="${stash_buses[$i]}"
+          for i in "${!stash_beams[@]}"; do
+            b="${stash_beams[$i]}"
             want="${stash_mtimes[$i]}"
-            got=$(stat -c %Y "$stash_shared/buses/$b/messages" 2>/dev/null || echo NA)
+            got=$(stat -c %Y "$stash_shared/beams/$b/messages" 2>/dev/null || echo NA)
             if [ "$got" != "$want" ]; then
               all_match=0
               break
@@ -117,7 +117,7 @@ cat >/dev/null 2>&1 || true
             exit 0  # silent return; nothing changed since last fire
           fi
         fi
-        # bus list mismatch OR mtime drift — fall through to slow path.
+        # beam list mismatch OR mtime drift — fall through to slow path.
       fi
     fi
   fi
@@ -132,7 +132,7 @@ cat >/dev/null 2>&1 || true
   # path next time.
   if [ -r "$cfg" ] && command -v stat >/dev/null 2>&1 && [ "$state_dir_safe" = "1" ]; then
     cfg_mtime=$(stat -c %Y "$cfg" 2>/dev/null || echo 0)
-    parsed=$(jq -r '.shared_path // "", "---SEP---", (.buses[]? // empty)' \
+    parsed=$(jq -r '.shared_path // "", "---SEP---", (.beams[]? // empty)' \
                 "$cfg" 2>/dev/null || true)
     if [ -n "$parsed" ]; then
       shared=$(printf '%s\n' "$parsed" | sed -n '1p')
@@ -151,14 +151,14 @@ cat >/dev/null 2>&1 || true
             printf '%s\n' "$parsed" | sed -n '/^---SEP---$/,$p' | tail -n +2 \
               | while IFS= read -r b; do
                   [ -n "$b" ] || continue
-                  m=$(stat -c %Y "$shared/buses/$b/messages" 2>/dev/null || echo NA)
+                  m=$(stat -c %Y "$shared/beams/$b/messages" 2>/dev/null || echo NA)
                   printf 'b=%s=%s\n' "$b" "$m"
                 done
           } > "$tmp_stash" 2>/dev/null
           # Validate at least one b= line landed before promoting. Under
           # pipefail with stderr suppressed, a non-zero exit from sed/tail
           # would otherwise leave a stash with only cfg=/shared= lines and
-          # zero buses — which the fast path treats as "nothing to check"
+          # zero beams — which the fast path treats as "nothing to check"
           # and silently drops all real messages until config changes.
           if grep -q '^b=' "$tmp_stash" 2>/dev/null; then
             mv "$tmp_stash" "$stash" 2>/dev/null || rm -f "$tmp_stash" 2>/dev/null

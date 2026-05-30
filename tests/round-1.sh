@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# End-to-end smoke test for the buses plugin.
+# End-to-end smoke test for the beams plugin.
 # Simulates two sessions (A and B) on a single machine using two distinct config dirs.
 set -euo pipefail
 
 PLUGIN="${PLUGIN_ROOT:-$(cd "$(dirname "$0")/.." && pwd)}"
-TMPDIR=$(mktemp -d /tmp/buses-test.XXXXXX)
+TMPDIR=$(mktemp -d /tmp/beams-test.XXXXXX)
 SHARED="$TMPDIR/share"
 CFG_A="$TMPDIR/cfg-a"
 CFG_B="$TMPDIR/cfg-b"
@@ -19,10 +19,10 @@ cleanup() { rm -rf "$TMPDIR"; }
 trap cleanup EXIT
 
 # Helpers to run a lib script "as" session A or B.
-as_a() { ( export BUSES_CONFIG_DIR="$CFG_A"; "$PLUGIN/lib/$1.sh" "${@:2}" ); }
-as_b() { ( export BUSES_CONFIG_DIR="$CFG_B"; "$PLUGIN/lib/$1.sh" "${@:2}" ); }
-hook_a() { ( export BUSES_CONFIG_DIR="$CFG_A"; export CLAUDE_PLUGIN_ROOT="$PLUGIN"; "$PLUGIN/hooks/check-messages.sh" </dev/null ); }
-hook_b() { ( export BUSES_CONFIG_DIR="$CFG_B"; export CLAUDE_PLUGIN_ROOT="$PLUGIN"; "$PLUGIN/hooks/check-messages.sh" </dev/null ); }
+as_a() { ( export BEAMS_CONFIG_DIR="$CFG_A"; "$PLUGIN/lib/$1.sh" "${@:2}" ); }
+as_b() { ( export BEAMS_CONFIG_DIR="$CFG_B"; "$PLUGIN/lib/$1.sh" "${@:2}" ); }
+hook_a() { ( export BEAMS_CONFIG_DIR="$CFG_A"; export CLAUDE_PLUGIN_ROOT="$PLUGIN"; "$PLUGIN/hooks/check-messages.sh" </dev/null ); }
+hook_b() { ( export BEAMS_CONFIG_DIR="$CFG_B"; export CLAUDE_PLUGIN_ROOT="$PLUGIN"; "$PLUGIN/hooks/check-messages.sh" </dev/null ); }
 
 banner "1. init both sessions against shared=$SHARED"
 mkdir -p "$SHARED"
@@ -41,12 +41,12 @@ as_b name "bob"   >/dev/null
 [ "$(jq -r '.session_name' "$CFG_B/config.json")" = "bob"   ] || fail "bob name not set"
 pass "alice and bob named"
 
-banner "3. create bus + both join"
+banner "3. create beam + both join"
 as_a create general >/dev/null
-[ -d "$SHARED/buses/general" ] || fail "bus not created"
+[ -d "$SHARED/beams/general" ] || fail "beam not created"
 as_a join general >/dev/null
 as_b join general >/dev/null
-ls "$SHARED/buses/general/members" | sort > "$TMPDIR/members.txt"
+ls "$SHARED/beams/general/members" | sort > "$TMPDIR/members.txt"
 [ "$(wc -l < "$TMPDIR/members.txt")" = "2" ] || fail "expected 2 member records, got: $(cat "$TMPDIR/members.txt")"
 pass "both joined, 2 member records present"
 
@@ -91,13 +91,13 @@ bob_hook3=$(hook_b)
 [ -z "$bob_hook3" ] || fail "bob should not receive own broadcast — got: $bob_hook3"
 pass "broadcast self-filter works"
 
-banner "11. /buses:status sanity"
+banner "11. /beams:status sanity"
 status_out=$(as_a status)
 echo "$status_out" | grep -q "session_name: alice" || fail "status missing alice's name"
 echo "$status_out" | grep -q "general" || fail "status missing 'general' subscription"
 pass "status output looks right"
 
-banner "12. /buses:list and /buses:members"
+banner "12. /beams:list and /beams:members"
 list_out=$(as_a list)
 echo "$list_out" | grep -q "general" || fail "list missing 'general'"
 members_out=$(as_a members general)
@@ -117,13 +117,13 @@ us=$(( (t1 - t0) / 1000 ))
 echo "  idle hook took ${us} µs"
 [ "$us" -lt 500000 ] || red "  (warning: idle hook took > 500ms; not a failure but worth investigating)"
 
-banner "15. /buses:read after a fresh message"
+banner "15. /beams:read after a fresh message"
 sleep 1
 as_a send general bob "second message" >/dev/null
 sleep 1
 read_out=$(as_b check --human)
-echo "$read_out" | grep -q "second message" || fail "/buses:read missing fresh message"
-pass "/buses:read shows new message"
+echo "$read_out" | grep -q "second message" || fail "/beams:read missing fresh message"
+pass "/beams:read shows new message"
 
 green ""
 green "ALL TESTS PASSED"

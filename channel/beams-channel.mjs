@@ -1,11 +1,11 @@
 #!/usr/bin/env node
-// buses-channel.mjs — MCP stdio channel server for the buses plugin.
+// beams-channel.mjs — MCP stdio channel server for the beams plugin.
 //
 // WHAT THIS IS
 //   An opt-in, experimental real-time bridge.  When the watcher daemon fires
 //   its --on-message hook, it POSTs to this server's HTTP listener.  The
 //   server emits a JSON-RPC notifications/claude/channel notification over
-//   stdout, which Claude Code delivers as a <channel source="buses" ...>
+//   stdout, which Claude Code delivers as a <channel source="beams" ...>
 //   event that wakes an already-open, idle session.
 //
 //   Architecture:
@@ -22,16 +22,16 @@
 //   ALL diagnostics, warnings, and info messages go to stderr via log().
 //
 // ENVIRONMENT VARIABLES
-//   BUSES_CHANNEL_PORT        HTTP port to listen on (default 8799).  Must be
+//   BEAMS_CHANNEL_PORT        HTTP port to listen on (default 8799).  Must be
 //                             a positive integer; invalid values fall back to
 //                             8799.
 //
-//   BUSES_CHANNEL_TOKEN       Shared secret for the x-buses-token request
+//   BEAMS_CHANNEL_TOKEN       Shared secret for the x-beams-token request
 //                             header.  If neither TOKEN nor TOKEN_FILE is set,
 //                             POSTs are accepted from localhost with a one-time
 //                             stderr warning.
 //
-//   BUSES_CHANNEL_TOKEN_FILE  Path to a file containing the token (trimmed).
+//   BEAMS_CHANNEL_TOKEN_FILE  Path to a file containing the token (trimmed).
 //                             If the file is missing, a random token is
 //                             generated, written at mode 0o600, and its PATH
 //                             is logged to stderr (the token value is never
@@ -40,7 +40,7 @@
 // EXPERIMENTAL / OPT-IN
 //   Channels are a Claude Code research preview (v2.1.80+).  This server
 //   must be launched with:
-//     claude --dangerously-load-development-channels server:buses
+//     claude --dangerously-load-development-channels server:beams
 //   because community-marketplace plugins are not on the allowlist.
 //   Anthropic auth (claude.ai or Console API key) is required; Bedrock,
 //   Vertex, and Foundry are not supported.  The protocol contract may change.
@@ -57,7 +57,7 @@ import process             from 'node:process';
 
 function log(...args) {
   const line = args.join(' ');
-  process.stderr.write(`[buses-channel] ${line}\n`);
+  process.stderr.write(`[beams-channel] ${line}\n`);
 }
 
 // ---------------------------------------------------------------------------
@@ -85,14 +85,14 @@ let _token = null;          // null means "no token configured"
 let _noTokenWarned = false; // emit the localhost-only warning at most once
 
 function loadToken() {
-  const envToken = process.env.BUSES_CHANNEL_TOKEN;
+  const envToken = process.env.BEAMS_CHANNEL_TOKEN;
   if (envToken && envToken.trim()) {
     _token = envToken.trim();
-    log('token loaded from BUSES_CHANNEL_TOKEN');
+    log('token loaded from BEAMS_CHANNEL_TOKEN');
     return;
   }
 
-  const tokenFile = process.env.BUSES_CHANNEL_TOKEN_FILE;
+  const tokenFile = process.env.BEAMS_CHANNEL_TOKEN_FILE;
   if (tokenFile && tokenFile.trim()) {
     const filePath = tokenFile.trim();
     if (existsSync(filePath)) {
@@ -110,7 +110,7 @@ function loadToken() {
       _token = generated;
       // Log the PATH (never the value).
       log(`generated new token and wrote it to: ${filePath}`);
-      log(`(set BUSES_CHANNEL_TOKEN or point BUSES_CHANNEL_TOKEN_FILE to that path before launching claude)`);
+      log(`(set BEAMS_CHANNEL_TOKEN or point BEAMS_CHANNEL_TOKEN_FILE to that path before launching claude)`);
       return;
     } catch (err) {
       log(`ERROR: could not write generated token to ${filePath}: ${err.message}`);
@@ -127,13 +127,13 @@ function checkToken(req) {
     // No token configured.  Warn once, then accept.
     if (!_noTokenWarned) {
       _noTokenWarned = true;
-      log('WARNING: no BUSES_CHANNEL_TOKEN configured. POSTs accepted from localhost without authentication.');
-      log('Set BUSES_CHANNEL_TOKEN (or BUSES_CHANNEL_TOKEN_FILE) before launching claude for defense-in-depth.');
+      log('WARNING: no BEAMS_CHANNEL_TOKEN configured. POSTs accepted from localhost without authentication.');
+      log('Set BEAMS_CHANNEL_TOKEN (or BEAMS_CHANNEL_TOKEN_FILE) before launching claude for defense-in-depth.');
     }
     return true;
   }
 
-  const provided = req.headers['x-buses-token'] || '';
+  const provided = req.headers['x-beams-token'] || '';
 
   // Constant-time comparison to resist timing attacks.
   // If lengths differ we must NOT use timingSafeEqual (it throws on unequal
@@ -152,28 +152,31 @@ function checkToken(req) {
 // ---------------------------------------------------------------------------
 
 function resolvePort() {
-  const raw = process.env.BUSES_CHANNEL_PORT;
+  const raw = process.env.BEAMS_CHANNEL_PORT;
   if (raw !== undefined && raw !== '') {
     const n = Number(raw);
     if (Number.isInteger(n) && n > 0 && n <= 65535) {
       return n;
     }
-    log(`WARNING: BUSES_CHANNEL_PORT="${raw}" is not a valid port; using default 8799`);
+    log(`WARNING: BEAMS_CHANNEL_PORT="${raw}" is not a valid port; using default 8799`);
   }
   return 8799;
 }
 
 // ---------------------------------------------------------------------------
 // Content sanitization — strip C0 control chars (0x00–0x1f), DEL (0x7f),
-// and C1 controls (0x80–0x9f).  Guards against prompt-injection and terminal
-// hijack via crafted message bodies.  Mirrors the defense-in-depth strip in
-// watcher_daemon.sh's dispatch_on_message().
+// C1 controls (0x80–0x9f), and the angle brackets < > .  Guards against
+// prompt-injection / terminal hijack via crafted message bodies, and (defense
+// in depth) stops a crafted body from forging a </channel> close or a fake
+// <channel ...> open in Claude's rendered view.  Operates on the DECODED
+// string, not raw bytes, so it never corrupts multi-byte UTF-8.  Mirrors the
+// defense-in-depth strip in watcher_daemon.sh's dispatch_on_message().
 // ---------------------------------------------------------------------------
 
 function sanitizeContent(str) {
-  // Remove U+0000–U+001F, U+007F, U+0080–U+009F
+  // Remove U+0000–U+001F, U+007F, U+0080–U+009F, and < >
   // eslint-disable-next-line no-control-regex
-  return str.replace(/[\x00-\x1f\x7f\x80-\x9f]/g, '');
+  return str.replace(/[\x00-\x1f\x7f\x80-\x9f<>]/g, '');
 }
 
 // Sanitize a meta key or value to identifier-safe characters only.
@@ -189,11 +192,11 @@ function sanitizeMetaValue(str) {
 // ---------------------------------------------------------------------------
 
 const CHANNEL_INSTRUCTIONS =
-  'Events from the buses channel arrive as <channel source="buses" bus="..." from="...">. ' +
-  'Each is a new cross-terminal bus message addressed to this session. ' +
-  'Read the full message with the /buses:read command, then surface it to the user ' +
+  'Events from the beams channel arrive as <channel source="beams" beam="..." from="...">. ' +
+  'Each is a new cross-terminal beam message addressed to this session. ' +
+  'Read the full message with the /beams:read command, then surface it to the user ' +
   '(who it\'s from + a short summary). ' +
-  'Respond on the bus (e.g. /buses:send) ONLY if this session\'s role/instructions ' +
+  'Respond on the beam (e.g. /beams:send) ONLY if this session\'s role/instructions ' +
   'call for autonomous replies; otherwise just surface it. ' +
   'These are one-way notifications — no reply is expected through the channel.';
 
@@ -234,7 +237,7 @@ function dispatch(msg) {
       capabilities: {
         experimental: { 'claude/channel': {} },
       },
-      serverInfo: { name: 'buses', version: '0.9.0' },
+      serverInfo: { name: 'beams', version: '0.9.0' },
       instructions: CHANNEL_INSTRUCTIONS,
     });
     return;
@@ -318,7 +321,7 @@ function startHttpServer(port) {
       if (!checkToken(req)) {
         res.writeHead(403, { 'Content-Type': 'text/plain' });
         res.end('forbidden');
-        log('rejected POST: bad or missing x-buses-token');
+        log('rejected POST: bad or missing x-beams-token');
         return;
       }
 
@@ -333,9 +336,10 @@ function startHttpServer(port) {
         if (next.length > MAX_BODY) {
           tooLarge = true;
           res.writeHead(413, { 'Content-Type': 'text/plain' });
-          res.end('payload too large');
           log('rejected POST: body exceeded 8192 bytes');
-          req.destroy();
+          // Destroy AFTER the 413 has flushed, so the caller gets a clean
+          // response instead of a TCP reset.
+          res.end('payload too large', () => req.destroy());
           return;
         }
         body = next;
@@ -350,11 +354,11 @@ function startHttpServer(port) {
 
         // 4. Build meta from headers.
         const meta = {};
-        const rawBus  = req.headers['x-buses-bus']  || '';
-        const rawFrom = req.headers['x-buses-from'] || '';
-        const safeB = sanitizeMetaValue(rawBus);
+        const rawBeam  = req.headers['x-beams-beam']  || '';
+        const rawFrom = req.headers['x-beams-from'] || '';
+        const safeB = sanitizeMetaValue(rawBeam);
         const safeF = sanitizeMetaValue(rawFrom);
-        if (safeB)  meta.bus  = safeB;
+        if (safeB)  meta.beam  = safeB;
         if (safeF)  meta.from = safeF;
 
         // 5. Emit the channel notification to stdout.
@@ -367,7 +371,7 @@ function startHttpServer(port) {
         // 6. Acknowledge.
         res.writeHead(200, { 'Content-Type': 'text/plain' });
         res.end('ok');
-        log(`dispatched channel event bus=${safeB || '(none)'} from=${safeF || '(none)'}`);
+        log(`dispatched channel event beam=${safeB || '(none)'} from=${safeF || '(none)'}`);
       });
 
       req.on('error', (err) => {
@@ -384,6 +388,13 @@ function startHttpServer(port) {
     res.end('method not allowed');
   });
 
+  // Defense-in-depth limits — don't rely on Node-version-specific defaults
+  // (e.g. Node 16's requestTimeout is 0 = unlimited). The doorbell only ever
+  // serves a same-host watcher, so these can be tight.
+  server.requestTimeout = 10000; // 10s for the whole request
+  server.headersTimeout = 8000;  // 8s to send headers
+  server.maxConnections = 32;    // a localhost doorbell needs very few
+
   server.listen(port, '127.0.0.1', () => {
     log(`HTTP listener ready on 127.0.0.1:${port}`);
   });
@@ -392,7 +403,7 @@ function startHttpServer(port) {
     log(`HTTP server error: ${err.message}`);
     // If the port is already in use, exit so Claude Code can surface the error.
     if (err.code === 'EADDRINUSE') {
-      log(`port ${port} is already in use — is another buses-channel running?`);
+      log(`port ${port} is already in use — is another beams-channel running?`);
       process.exit(1);
     }
   });
@@ -426,4 +437,4 @@ const PORT = resolvePort();
 startStdinReader();
 startHttpServer(PORT);
 
-log(`buses-channel ready (MCP/stdio + HTTP :${PORT}) — experimental, opt-in`);
+log(`beams-channel ready (MCP/stdio + HTTP :${PORT}) — experimental, opt-in`);

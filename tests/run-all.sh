@@ -17,7 +17,7 @@ red()   { printf '\033[31m%s\033[0m\n' "$*"; }
 green() { printf '\033[32m%s\033[0m\n' "$*"; }
 bold()  { printf '\033[1m%s\033[0m\n' "$*"; }
 
-bold "Running buses smoke tests against $PLUGIN_ROOT"
+bold "Running beams smoke tests against $PLUGIN_ROOT"
 fail=0
 fail_list=()
 t0=$(date +%s)
@@ -28,7 +28,7 @@ for r in "${ROUNDS[@]}"; do
     continue
   fi
   printf '  round %-2s ... ' "$r"
-  if "$script" > "/tmp/buses-test-round-$r.log" 2>&1; then
+  if "$script" > "/tmp/beams-test-round-$r.log" 2>&1; then
     green "OK"
   else
     red "FAIL"
@@ -45,8 +45,8 @@ else
   red "$fail round(s) FAILED: ${fail_list[*]}"
   for r in "${fail_list[@]}"; do
     echo
-    bold "── /tmp/buses-test-round-$r.log (last 30 lines) ──"
-    tail -n 30 "/tmp/buses-test-round-$r.log"
+    bold "── /tmp/beams-test-round-$r.log (last 30 lines) ──"
+    tail -n 30 "/tmp/beams-test-round-$r.log"
   done
   exit 1
 fi

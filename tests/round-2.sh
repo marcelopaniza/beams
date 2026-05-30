@@ -4,7 +4,7 @@
 set -euo pipefail
 
 PLUGIN="${PLUGIN_ROOT:-$(cd "$(dirname "$0")/.." && pwd)}"
-TMPDIR=$(mktemp -d /tmp/buses-test2.XXXXXX)
+TMPDIR=$(mktemp -d /tmp/beams-test2.XXXXXX)
 SHARED="$TMPDIR/share"
 CFG_A="$TMPDIR/cfg-a"
 CFG_B="$TMPDIR/cfg-b"
@@ -29,13 +29,13 @@ cleanup() {
 }
 trap cleanup EXIT
 
-run_as() { ( export BUSES_CONFIG_DIR="$1"; "$PLUGIN/lib/$2.sh" "${@:3}" ); }
+run_as() { ( export BEAMS_CONFIG_DIR="$1"; "$PLUGIN/lib/$2.sh" "${@:3}" ); }
 as_a() { run_as "$CFG_A" "$@"; }
 as_b() { run_as "$CFG_B" "$@"; }
 as_c() { run_as "$CFG_C" "$@"; }
 
 hook_as() {
-  ( export BUSES_CONFIG_DIR="$1"; export CLAUDE_PLUGIN_ROOT="$PLUGIN";
+  ( export BEAMS_CONFIG_DIR="$1"; export CLAUDE_PLUGIN_ROOT="$PLUGIN";
     "$PLUGIN/hooks/check-messages.sh" </dev/null )
 }
 hook_a() { hook_as "$CFG_A"; }
@@ -64,15 +64,15 @@ SID_B=$(jq -r '.session_id' "$CFG_B/config.json")
 SID_C=$(jq -r '.session_id' "$CFG_C/config.json")
 pass "alice=$SID_A bob=$SID_B carol=$SID_C"
 
-# ── manager: carol creates the bus → carol is manager ─────────────────────
-banner "carol creates 'team' bus and is manager"
+# ── manager: carol creates the beam → carol is manager ─────────────────────
+banner "carol creates 'team' beam and is manager"
 as_c create team >/dev/null
 as_c join team   >/dev/null
 as_a join team   >/dev/null
 as_b join team   >/dev/null
-mgr=$(jq -r '(.driver // .manager)' "$SHARED/buses/team/manifest.json")
+mgr=$(jq -r '(.driver // .manager)' "$SHARED/beams/team/manifest.json")
 [ "$mgr" = "$SID_C" ] || fail "driver should be carol ($SID_C), got $mgr"
-pass "carol owns the team bus"
+pass "carol owns the team beam"
 
 # ── lock/unlock ───────────────────────────────────────────────────────────
 banner "alice (non-manager) tries to lock → must fail"
@@ -84,7 +84,7 @@ pass "non-manager lock correctly refused"
 banner "carol locks team with reason"
 out=$(as_c lock team "release freeze")
 echo "  $out"
-jq -e '.locked.reason == "release freeze"' "$SHARED/buses/team/manifest.json" >/dev/null \
+jq -e '.locked.reason == "release freeze"' "$SHARED/beams/team/manifest.json" >/dev/null \
   || fail "lock manifest field missing or wrong"
 pass "lock applied to manifest"
 
@@ -94,7 +94,7 @@ if out=$(as_a send team carol "hi" 2>&1); then
 fi
 case "$out" in *locked*) pass "send blocked with lock message" ;; *) fail "wrong error: $out" ;; esac
 
-banner "carol (manager) can still send to locked bus"
+banner "carol (manager) can still send to locked beam"
 out=$(as_c send team alice "manager override works")
 echo "  $out"
 sleep 1
@@ -105,7 +105,7 @@ pass "manager bypassed the lock"
 banner "carol unlocks; alice can send again"
 out=$(as_c unlock team)
 echo "  $out"
-jq -e '.locked == null' "$SHARED/buses/team/manifest.json" >/dev/null \
+jq -e '.locked == null' "$SHARED/beams/team/manifest.json" >/dev/null \
   || fail "unlock should have removed .locked"
 sleep 1
 out=$(as_a send team carol "thanks for unlocking")
@@ -123,8 +123,8 @@ banner "carol kicks bob"
 sleep 1
 out=$(as_c kick team bob "stop spamming")
 echo "  $out"
-[ ! -f "$SHARED/buses/team/members/$SID_B.json" ] || fail "bob's member record should be gone"
-jq -e --arg b "$SID_B" '.banned | index($b) != null' "$SHARED/buses/team/manifest.json" >/dev/null \
+[ ! -f "$SHARED/beams/team/members/$SID_B.json" ] || fail "bob's member record should be gone"
+jq -e --arg b "$SID_B" '.banned | index($b) != null' "$SHARED/beams/team/manifest.json" >/dev/null \
   || fail "bob's UUID not in banlist"
 pass "bob removed from members and banlist updated"
 
@@ -149,7 +149,7 @@ pass "kick-notice delivered to bob"
 banner "carol unkicks bob; bob can rejoin and send"
 out=$(as_c unkick team "$SID_B")
 echo "  $out"
-jq -e --arg b "$SID_B" '.banned // [] | index($b) == null' "$SHARED/buses/team/manifest.json" >/dev/null \
+jq -e --arg b "$SID_B" '.banned // [] | index($b) == null' "$SHARED/beams/team/manifest.json" >/dev/null \
   || fail "bob still in banlist after unkick"
 out=$(as_b join team)
 echo "  $out"
@@ -167,8 +167,8 @@ pass "members listing marks the driver"
 # ── watcher: start, fire notification via stub, stop ──────────────────────
 banner "alice starts watcher with stub notifier (1s interval)"
 sleep 1
-export BUSES_NOTIFIER_CMD="$TMPDIR/notify-stub.sh"
-out=$( BUSES_CONFIG_DIR="$CFG_A" BUSES_NOTIFIER_CMD="$BUSES_NOTIFIER_CMD" \
+export BEAMS_NOTIFIER_CMD="$TMPDIR/notify-stub.sh"
+out=$( BEAMS_CONFIG_DIR="$CFG_A" BEAMS_NOTIFIER_CMD="$BEAMS_NOTIFIER_CMD" \
        "$PLUGIN/lib/watch.sh" start 1 )
 echo "  $out"
 echo "$out" | grep -q "watcher started" || fail "watcher did not report started"
@@ -180,8 +180,8 @@ pid=$(cat "$pid_file")
 kill -0 "$pid" 2>/dev/null || fail "watcher pid $pid is not alive"
 pass "watcher running pid=$pid"
 
-banner "alice's /buses:watch status reports RUNNING"
-status_out=$( BUSES_CONFIG_DIR="$CFG_A" "$PLUGIN/lib/watch.sh" status )
+banner "alice's /beams:watch status reports RUNNING"
+status_out=$( BEAMS_CONFIG_DIR="$CFG_A" "$PLUGIN/lib/watch.sh" status )
 echo "$status_out" | grep -q "RUNNING" || fail "status didn't say RUNNING"
 echo "$status_out" | grep -q "$pid"    || fail "status missing pid"
 pass "status reports RUNNING with correct pid"
@@ -202,7 +202,7 @@ grep -q "watcher should ping" "$NOTIFY_LOG" || {
   tail -n 20 "$CFG_A/state"/*/watcher.log 2>/dev/null | sed 's/^/    /' || true
   fail "notifier was never invoked"
 }
-grep -q "buses: carol on team" "$NOTIFY_LOG" || fail "notify title missing 'carol on team'"
+grep -q "beams: carol on team" "$NOTIFY_LOG" || fail "notify title missing 'carol on team'"
 pass "watcher fired desktop notification with correct content"
 
 banner "verify hook cursor not advanced — alice's next prompt still gets the message"
@@ -221,8 +221,8 @@ sleep 2
 }
 pass "no re-notification after hook delivery"
 
-banner "alice's /buses:watch stop"
-out=$( BUSES_CONFIG_DIR="$CFG_A" "$PLUGIN/lib/watch.sh" stop )
+banner "alice's /beams:watch stop"
+out=$( BEAMS_CONFIG_DIR="$CFG_A" "$PLUGIN/lib/watch.sh" stop )
 echo "  $out"
 sleep 0.5
 kill -0 "$pid" 2>/dev/null && fail "watcher pid $pid still alive after stop"
@@ -230,13 +230,13 @@ kill -0 "$pid" 2>/dev/null && fail "watcher pid $pid still alive after stop"
 pass "watcher stopped cleanly"
 
 banner "starting watcher twice is idempotent"
-BUSES_CONFIG_DIR="$CFG_A" BUSES_NOTIFIER_CMD="$BUSES_NOTIFIER_CMD" \
+BEAMS_CONFIG_DIR="$CFG_A" BEAMS_NOTIFIER_CMD="$BEAMS_NOTIFIER_CMD" \
   "$PLUGIN/lib/watch.sh" start 1 >/dev/null
-out=$( BUSES_CONFIG_DIR="$CFG_A" BUSES_NOTIFIER_CMD="$BUSES_NOTIFIER_CMD" \
+out=$( BEAMS_CONFIG_DIR="$CFG_A" BEAMS_NOTIFIER_CMD="$BEAMS_NOTIFIER_CMD" \
        "$PLUGIN/lib/watch.sh" start 1 )
 echo "  $out"
 echo "$out" | grep -q "already running" || fail "second start should report already running"
-BUSES_CONFIG_DIR="$CFG_A" "$PLUGIN/lib/watch.sh" stop >/dev/null
+BEAMS_CONFIG_DIR="$CFG_A" "$PLUGIN/lib/watch.sh" stop >/dev/null
 pass "second start is idempotent"
 
 green ""

@@ -1,5 +1,5 @@
 ---
-description: "List every bus that exists on the shared folder, marking which ones this session is subscribed to."
+description: "List every beam that exists on the shared folder, marking which ones this session is subscribed to."
 argument-hint: "(no arguments)"
 allowed-tools: ["Bash(${CLAUDE_PLUGIN_ROOT}/lib/list.sh:*)"]
 ---

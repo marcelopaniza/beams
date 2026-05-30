@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# /buses:cleanup-stale <bus> [--older-than <duration>] [--force] [--dry-run]
+# /beams:cleanup-stale <beam> [--older-than <duration>] [--force] [--dry-run]
 #
 # Driver-only. Removes member records whose last_seen is older than the
 # threshold. Defaults to 30 days. Refuses to remove the current driver's
@@ -10,16 +10,16 @@
 
 set -euo pipefail
 source "$(cd "$(dirname "$0")" && pwd)/common.sh"
-buses::require jq find
-buses::config_require
+beams::require jq find
+beams::config_require
 
 # The matching .md command quotes "$ARGUMENTS" as a single arg for safety
 # against shell metacharacters in user input. Re-split it into positionals
 # here (whitespace-only; no shell interpretation). When tests call the
 # script directly with already-split args, $# > 1 and we leave them alone.
-[ "$#" -le 1 ] && { read -ra __buses_args <<<"${1-}"; set -- "${__buses_args[@]}"; unset __buses_args; }
+[ "$#" -le 1 ] && { read -ra __beams_args <<<"${1-}"; set -- "${__beams_args[@]}"; unset __beams_args; }
 
-bus=""
+beam=""
 older_than="30d"
 force=""
 dry=""
@@ -29,23 +29,23 @@ while [ $# -gt 0 ]; do
     --older-than) older_than="${2:-}"; shift 2 ;;
     --force)      force=1; shift ;;
     --dry-run)    dry=1; shift ;;
-    -*)           buses::die "unknown flag: $1" ;;
-    *)            [ -z "$bus" ] && bus="$1" || buses::die "unexpected arg: $1" ; shift ;;
+    -*)           beams::die "unknown flag: $1" ;;
+    *)            [ -z "$beam" ] && beam="$1" || beams::die "unexpected arg: $1" ; shift ;;
   esac
 done
 
-[ -n "$bus" ] || buses::die "usage: cleanup-stale.sh <bus> [--older-than 30d] [--force] [--dry-run]"
-buses::bus_exists "$bus" || buses::die "bus '$bus' does not exist"
-buses::is_driver "$bus"  || buses::die "only the driver of '$bus' can run cleanup"
+[ -n "$beam" ] || beams::die "usage: cleanup-stale.sh <beam> [--older-than 30d] [--force] [--dry-run]"
+beams::beam_exists "$beam" || beams::die "beam '$beam' does not exist"
+beams::is_driver "$beam"  || beams::die "only the driver of '$beam' can run cleanup"
 
 # Duration → find flag (shared helper).
-mapfile -t find_flag < <(buses::parse_duration "$older_than") \
-  || buses::die "bad --older-than: $older_than (use Nd / Nh / Nm)"
-[ "${#find_flag[@]}" -eq 2 ] || buses::die "bad --older-than: $older_than"
+mapfile -t find_flag < <(beams::parse_duration "$older_than") \
+  || beams::die "bad --older-than: $older_than (use Nd / Nh / Nm)"
+[ "${#find_flag[@]}" -eq 2 ] || beams::die "bad --older-than: $older_than"
 
-drv=$(buses::driver_uuid "$bus")
-mdir=$(buses::bus_members "$bus")
-[ -d "$mdir" ] || { printf 'buses: bus "%s" has no members directory\n' "$bus"; exit 0; }
+drv=$(beams::driver_uuid "$beam")
+mdir=$(beams::beam_members "$beam")
+[ -d "$mdir" ] || { printf 'beams: beam "%s" has no members directory\n' "$beam"; exit 0; }
 
 removed=0
 skipped_driver=0
@@ -68,13 +68,13 @@ while IFS= read -r f; do
 done < <(find "$mdir" -maxdepth 1 -name '*.json' -type f "${find_flag[@]}" 2>/dev/null)
 
 if [ "$removed" -eq 0 ]; then
-  printf 'buses: nothing to clean up in "%s" (no member records older than %s)\n' "$bus" "$older_than"
+  printf 'beams: nothing to clean up in "%s" (no member records older than %s)\n' "$beam" "$older_than"
 else
-  printf 'buses: cleanup of "%s" (--older-than %s%s)\n' "$bus" "$older_than" "${dry:+ — DRY RUN}"
+  printf 'beams: cleanup of "%s" (--older-than %s%s)\n' "$beam" "$older_than" "${dry:+ — DRY RUN}"
   for line in "${removed_list[@]}"; do printf '  %s\n' "$line"; done
-  printf 'buses: %s record(s)%s\n' "$removed" "${dry:+ would be removed}"
+  printf 'beams: %s record(s)%s\n' "$removed" "${dry:+ would be removed}"
 fi
 
 if [ "$skipped_driver" -eq 1 ]; then
-  printf 'buses: skipped the current driver record (use --force to include it)\n'
+  printf 'beams: skipped the current driver record (use --force to include it)\n'
 fi

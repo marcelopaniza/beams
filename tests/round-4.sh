@@ -3,7 +3,7 @@
 set -euo pipefail
 
 PLUGIN="${PLUGIN_ROOT:-$(cd "$(dirname "$0")/.." && pwd)}"
-TMPDIR=$(mktemp -d /tmp/buses-test4.XXXXXX)
+TMPDIR=$(mktemp -d /tmp/beams-test4.XXXXXX)
 SHARED="$TMPDIR/share"
 CFG_A="$TMPDIR/cfg-a"
 CFG_B="$TMPDIR/cfg-b"
@@ -16,8 +16,8 @@ fail()  { red "FAIL: $*"; exit 1; }
 pass()  { green "PASS: $*"; }
 trap 'rm -rf "$TMPDIR"' EXIT
 
-as() { ( export BUSES_CONFIG_DIR="$1"; "$PLUGIN/lib/$2.sh" "${@:3}" ); }
-hook() { ( export BUSES_CONFIG_DIR="$1"; export CLAUDE_PLUGIN_ROOT="$PLUGIN"; "$PLUGIN/hooks/check-messages.sh" </dev/null ); }
+as() { ( export BEAMS_CONFIG_DIR="$1"; "$PLUGIN/lib/$2.sh" "${@:3}" ); }
+hook() { ( export BEAMS_CONFIG_DIR="$1"; export CLAUDE_PLUGIN_ROOT="$PLUGIN"; "$PLUGIN/hooks/check-messages.sh" </dev/null ); }
 ctx() { hook "$1" | jq -r '.hookSpecificOutput.additionalContext // ""'; }
 
 mkdir -p "$SHARED"
@@ -38,24 +38,24 @@ as "$CFG_B" join team >/dev/null
 as "$CFG_C" join team >/dev/null
 
 banner "1. driver field is written on create (no legacy 'manager' key)"
-jq -e '.driver != null and .manager == null' "$SHARED/buses/team/manifest.json" >/dev/null \
-  || fail "new bus should have .driver and no .manager"
+jq -e '.driver != null and .manager == null' "$SHARED/beams/team/manifest.json" >/dev/null \
+  || fail "new beam should have .driver and no .manager"
 pass "new manifest uses .driver"
 
 banner "2. legacy 'manager' field is still recognised"
 # Simulate a pre-rename manifest by writing manager directly.
 echo '{"name":"legacy","created":"2020-01-01","created_by":"'$SID_A'","manager":"'$SID_A'"}' \
-  > "$SHARED/buses/team/manifest.json"
-mkdir -p "$SHARED/buses/team/members"
+  > "$SHARED/beams/team/manifest.json"
+mkdir -p "$SHARED/beams/team/members"
 as "$CFG_A" lock team "test" >/dev/null \
   || fail "alice (legacy manager) should be able to lock"
 # After the lock, write should have migrated manager → driver
-jq -e '.driver == "'"$SID_A"'" and .manager == null' "$SHARED/buses/team/manifest.json" >/dev/null \
+jq -e '.driver == "'"$SID_A"'" and .manager == null' "$SHARED/beams/team/manifest.json" >/dev/null \
   || fail "manifest should have auto-migrated to .driver on write"
 as "$CFG_A" unlock team >/dev/null
 pass "legacy manager honoured; auto-migrates to driver on write"
 
-banner "3. /buses:members shows 'driver' and 'rider'"
+banner "3. /beams:members shows 'driver' and 'rider'"
 # Refresh member records for everyone
 as "$CFG_A" join team >/dev/null
 as "$CFG_B" join team >/dev/null
@@ -65,7 +65,7 @@ echo "$m" | grep -E "$SID_A.*driver" >/dev/null || fail "alice should be driver"
 echo "$m" | grep -E "$SID_B.*rider"  >/dev/null || fail "bob should be rider"
 pass "role column shows driver/rider"
 
-banner "4. /buses:transfer-driver — bob (not driver) cannot transfer"
+banner "4. /beams:transfer-driver — bob (not driver) cannot transfer"
 if out=$(as "$CFG_B" transfer-driver team alice 2>&1); then
   fail "non-driver transfer should fail; got: $out"
 fi
@@ -74,7 +74,7 @@ pass "non-driver transfer refused"
 banner "5. alice transfers driver to bob (by name)"
 out=$(as "$CFG_A" transfer-driver team bob)
 echo "  $out"
-jq -e '.driver == "'"$SID_B"'"' "$SHARED/buses/team/manifest.json" >/dev/null \
+jq -e '.driver == "'"$SID_B"'"' "$SHARED/beams/team/manifest.json" >/dev/null \
   || fail "driver should now be bob"
 pass "driver transferred to bob"
 
@@ -97,23 +97,23 @@ banner "7b. --force takeover succeeds once the driver looks gone"
 # Backdate bob's member record to 8 days ago to simulate "machine dead".
 touch -t $(date -d '8 days ago' +%Y%m%d%H%M 2>/dev/null \
            || date -v-8d +%Y%m%d%H%M) \
-       "$SHARED/buses/team/members/$SID_B.json"
+       "$SHARED/beams/team/members/$SID_B.json"
 out=$(as "$CFG_A" transfer-driver team alice --force)
 echo "  $out"
-jq -e '.driver == "'"$SID_A"'"' "$SHARED/buses/team/manifest.json" >/dev/null \
+jq -e '.driver == "'"$SID_A"'"' "$SHARED/beams/team/manifest.json" >/dev/null \
   || fail "alice should have taken over via --force after backdating"
 pass "--force takeover works when driver is stale"
 
-banner "8. /buses:cleanup-stale — backdate a member, then clean"
+banner "8. /beams:cleanup-stale — backdate a member, then clean"
 # Backdate carol's member file to 60 days ago.
 touch -t $(date -d '60 days ago' +%Y%m%d%H%M 2>/dev/null \
            || date -v-60d +%Y%m%d%H%M) \
-       "$SHARED/buses/team/members/$SID_C.json"
+       "$SHARED/beams/team/members/$SID_C.json"
 out=$(as "$CFG_A" cleanup-stale team --older-than 30d)
 echo "  $out"
-[ ! -f "$SHARED/buses/team/members/$SID_C.json" ] || fail "carol's stale record should be removed"
-[ -f "$SHARED/buses/team/members/$SID_A.json" ]   || fail "driver alice should be preserved"
-[ -f "$SHARED/buses/team/members/$SID_B.json" ]   || fail "fresh bob should be preserved"
+[ ! -f "$SHARED/beams/team/members/$SID_C.json" ] || fail "carol's stale record should be removed"
+[ -f "$SHARED/beams/team/members/$SID_A.json" ]   || fail "driver alice should be preserved"
+[ -f "$SHARED/beams/team/members/$SID_B.json" ]   || fail "fresh bob should be preserved"
 pass "cleanup removed stale carol, kept alice (driver) and fresh bob"
 
 banner "9. cleanup-stale --dry-run does not delete"
@@ -121,9 +121,9 @@ banner "9. cleanup-stale --dry-run does not delete"
 as "$CFG_C" join team >/dev/null
 touch -t $(date -d '60 days ago' +%Y%m%d%H%M 2>/dev/null \
            || date -v-60d +%Y%m%d%H%M) \
-       "$SHARED/buses/team/members/$SID_C.json"
+       "$SHARED/beams/team/members/$SID_C.json"
 out=$(as "$CFG_A" cleanup-stale team --older-than 30d --dry-run)
-[ -f "$SHARED/buses/team/members/$SID_C.json" ] || fail "dry-run should not delete"
+[ -f "$SHARED/beams/team/members/$SID_C.json" ] || fail "dry-run should not delete"
 echo "$out" | grep -q "WOULD-REMOVE"            || fail "dry-run should print WOULD-REMOVE lines"
 pass "--dry-run preserves files and reports intent"
 

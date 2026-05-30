@@ -1,0 +1,26 @@
+<!doctype html>
+<!-- Source for assets/beams-any-ai.jpg. Background art = Codex imagegen (assets/beams-any-ai-clean.jpg).
+     Re-render:  google-chrome --headless=new --window-size=1536,1024 \
+       --screenshot=/tmp/beams-any-ai.png "file://$PWD/assets/beams-any-ai.html"
+     then:  convert /tmp/beams-any-ai.png -quality 90 assets/beams-any-ai.jpg -->
+<html><head><meta charset="utf-8"><style>
+*{margin:0;padding:0;box-sizing:border-box}
+html,body{width:1536px;height:1024px;overflow:hidden}
+.stage{position:relative;width:1536px;height:1024px;
+  background:#05060f url('beams-any-ai-clean.jpg') center/cover no-repeat;
+  font-family:'Arial','Helvetica','DejaVu Sans',sans-serif}
+.scrim{position:absolute;inset:0;
+  background:linear-gradient(to top, rgba(3,4,12,0.90) 0%, rgba(3,4,12,0.45) 15%, rgba(3,4,12,0) 34%)}
+.cap{position:absolute;left:0;right:0;bottom:56px;text-align:center}
+.cap .h{font-size:56px;font-weight:800;letter-spacing:0.02em;line-height:1.05;
+  background:linear-gradient(90deg,#ffd27f 0%,#ffffff 50%,#7fe0ff 100%);
+  -webkit-background-clip:text;background-clip:text;color:transparent;
+  filter:drop-shadow(0 0 14px rgba(120,200,255,0.45))}
+.cap .s{margin-top:16px;font-size:30px;font-weight:500;color:#dce9ff;letter-spacing:0.01em;
+  text-shadow:0 2px 16px rgba(0,0,0,0.92)}
+</style></head><body>
+<div class="stage"><div class="scrim"></div>
+<div class="cap">
+  <div class="h">Built for Claude Code &mdash; works with any AI</div>
+  <div class="s">the same beams carry Codex, Gemini, DeepSeek, Ollama, or your own CLI</div>
+</div></div></body></html>

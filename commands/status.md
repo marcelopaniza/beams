@@ -1,5 +1,5 @@
 ---
-description: "Show this session's buses config: shared path, session id/name, subscriptions, unread counts."
+description: "Show this session's beams config: shared path, session id/name, subscriptions, unread counts."
 argument-hint: "(no arguments)"
 allowed-tools: ["Bash(${CLAUDE_PLUGIN_ROOT}/lib/status.sh:*)"]
 ---

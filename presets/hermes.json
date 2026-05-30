@@ -1,5 +1,5 @@
 {
-  "_comment": "Hermes preset — defaults for a human-facing PM/AI-bridge session. Used by /buses:init --profile hermes. See README 'Profiles' section for the schema.",
+  "_comment": "Hermes preset — defaults for a human-facing PM/AI-bridge session. Used by /beams:init --profile hermes. See README 'Profiles' section for the schema.",
   "default_name": "jose",
   "role": "hermes",
   "auto_subscribe": ["all"]

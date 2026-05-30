@@ -1,23 +1,23 @@
 #!/usr/bin/env bash
-# Background poller for the buses plugin. Started by `lib/watch.sh start`.
+# Background poller for the beams plugin. Started by `lib/watch.sh start`.
 # Polls every $1 seconds (default 5), fires desktop notifications for new
 # messages addressed to this session. Uses the NOTIFY cursor only — does NOT
 # touch the hook cursor, so the model still sees these messages when the user
 # next types into Claude.
 #
 # Env:
-#   BUSES_CONFIG_DIR           — inherited from the launching shell.
-#   BUSES_NOTIFIER_CMD         — optional override: invoked as "$cmd <title> <body>".
+#   BEAMS_CONFIG_DIR           — inherited from the launching shell.
+#   BEAMS_NOTIFIER_CMD         — optional override: invoked as "$cmd <title> <body>".
 #                                Useful for testing or piping notifications elsewhere.
-#   BUSES_ON_MESSAGE_CMD       — optional shell snippet dispatched after each new
-#                                message. Receives env: BUSES_BUS, BUSES_FROM,
-#                                BUSES_PREVIEW. Forked async, capped at
-#                                $BUSES_ON_MESSAGE_TIMEOUT seconds (default 30).
+#   BEAMS_ON_MESSAGE_CMD       — optional shell snippet dispatched after each new
+#                                message. Receives env: BEAMS_BEAM, BEAMS_FROM,
+#                                BEAMS_PREVIEW. Forked async, capped at
+#                                $BEAMS_ON_MESSAGE_TIMEOUT seconds (default 30).
 #                                Failures logged to state/on-message.log; never
 #                                crash the daemon nor roll back the notify cursor.
-#   BUSES_ON_MESSAGE_TIMEOUT   — seconds; default 30. Used only if `timeout` is
+#   BEAMS_ON_MESSAGE_TIMEOUT   — seconds; default 30. Used only if `timeout` is
 #                                on PATH (most modern Linux/BSD/macOS-coreutils).
-#   BUSES_ON_MESSAGE_MAX_INFLIGHT
+#   BEAMS_ON_MESSAGE_MAX_INFLIGHT
 #                              — positive integer cap on concurrent dispatched
 #                                children (default 8). Excess fires on a burst
 #                                are logged as SKIPPED and dropped, so a sender
@@ -34,11 +34,11 @@ interval="${1:-5}"
 case "$interval" in ''|*[!0-9]*) interval=5 ;; esac
 [ "$interval" -ge 1 ] || interval=5
 
-[ -f "$BUSES_CONFIG_FILE" ] || { echo "watcher: no config — exiting" >&2; exit 1; }
-sid=$(buses::config_get '.session_id')
+[ -f "$BEAMS_CONFIG_FILE" ] || { echo "watcher: no config — exiting" >&2; exit 1; }
+sid=$(beams::config_get '.session_id')
 [ -n "$sid" ]               || { echo "watcher: empty session_id — exiting" >&2; exit 1; }
 
-state_dir=$(buses::state_dir)
+state_dir=$(beams::state_dir)
 mkdir -p "$state_dir"
 
 # Path to our own log file, used for in-process rotation in the loop below.
@@ -48,14 +48,14 @@ echo $$ > "$pid_file"
 
 cleanup() {
   rm -f "$pid_file"
-  echo "[$(buses::now_iso)] watcher stop pid=$$"
+  echo "[$(beams::now_iso)] watcher stop pid=$$"
   exit 0
 }
 trap cleanup TERM INT HUP
 
-# Detect notifier once, print to log so /buses:watch status can show it.
+# Detect notifier once, print to log so /beams:watch status can show it.
 detect_notifier() {
-  if [ -n "${BUSES_NOTIFIER_CMD:-}" ];      then echo "override:${BUSES_NOTIFIER_CMD}"
+  if [ -n "${BEAMS_NOTIFIER_CMD:-}" ];      then echo "override:${BEAMS_NOTIFIER_CMD}"
   elif command -v notify-send       >/dev/null 2>&1; then echo notify-send
   elif command -v terminal-notifier >/dev/null 2>&1; then echo terminal-notifier
   elif command -v osascript         >/dev/null 2>&1; then echo osascript
@@ -66,14 +66,14 @@ detect_notifier() {
 notifier=$(detect_notifier)
 
 # --- on-message dispatch -----------------------------------------------------
-# When BUSES_ON_MESSAGE_CMD is set, every new message addressed to us spawns
-# `bash -c "$BUSES_ON_MESSAGE_CMD"` in the background with BUSES_BUS,
-# BUSES_FROM, BUSES_PREVIEW exported. Body content reaches the cmd ONLY via env
+# When BEAMS_ON_MESSAGE_CMD is set, every new message addressed to us spawns
+# `bash -c "$BEAMS_ON_MESSAGE_CMD"` in the background with BEAMS_BEAM,
+# BEAMS_FROM, BEAMS_PREVIEW exported. Body content reaches the cmd ONLY via env
 # vars — the cmd snippet text is never templated with body bytes, so a
 # malicious body (`'; rm -rf ~ #`) cannot escape into shell.
 #
 # Each fire is fork-and-forget: detached background subshell, output captured
-# to state/on-message.log, capped at BUSES_ON_MESSAGE_TIMEOUT seconds when
+# to state/on-message.log, capped at BEAMS_ON_MESSAGE_TIMEOUT seconds when
 # `timeout` is available. Failures (non-zero exit, timeout, missing utility)
 # are logged but never crash the daemon nor affect cursor advance — the notify
 # cursor has already moved by the time we get here.
@@ -87,17 +87,17 @@ notifier=$(detect_notifier)
 # Inflight cap: each new message backgrounds a `bash -c` subshell. A burst of
 # N messages in one poll cycle would otherwise spawn N concurrent children
 # (fd/PID exhaustion, runaway outbound traffic if the cmd hits a webhook).
-# We gate on `jobs -rp | wc -l` against BUSES_ON_MESSAGE_MAX_INFLIGHT (default
+# We gate on `jobs -rp | wc -l` against BEAMS_ON_MESSAGE_MAX_INFLIGHT (default
 # 8). Excess fires are SKIPPED (logged, not queued) — the daemon stays
 # responsive; the user can tune the cap or write a queueing cmd if they need
 # every message.
 on_message_log="$state_dir/on-message.log"
 
-om_timeout="${BUSES_ON_MESSAGE_TIMEOUT:-30}"
+om_timeout="${BEAMS_ON_MESSAGE_TIMEOUT:-30}"
 case "$om_timeout" in ''|*[!0-9]*) om_timeout=30 ;; esac
 [ "$om_timeout" -ge 1 ] || om_timeout=30
 
-om_inflight_max="${BUSES_ON_MESSAGE_MAX_INFLIGHT:-8}"
+om_inflight_max="${BEAMS_ON_MESSAGE_MAX_INFLIGHT:-8}"
 case "$om_inflight_max" in ''|*[!0-9]*) om_inflight_max=8 ;; esac
 [ "$om_inflight_max" -ge 1 ] || om_inflight_max=8
 
@@ -113,7 +113,7 @@ on_message_safe=1
 on_message_check_symlink() {
   if [ -L "$on_message_log" ]; then
     if [ "$on_message_safe" = 1 ]; then
-      echo "[$(buses::now_iso)] WARN: on-message.log is a symlink — refusing to follow; on-message dispatch DISABLED this run"
+      echo "[$(beams::now_iso)] WARN: on-message.log is a symlink — refusing to follow; on-message dispatch DISABLED this run"
     fi
     on_message_safe=0
     return 1
@@ -123,7 +123,7 @@ on_message_check_symlink() {
 on_message_check_symlink || true
 
 dispatch_on_message() {
-  local bus="$1" from="$2" preview="$3"
+  local beam="$1" from="$2" preview="$3"
 
   # Per-loop symlink re-check (handles attacker planting after startup).
   on_message_check_symlink || return 0
@@ -137,8 +137,8 @@ dispatch_on_message() {
   inflight=$(jobs -rp 2>/dev/null | wc -l)
   inflight="${inflight//[[:space:]]/}"
   if [ "${inflight:-0}" -ge "$om_inflight_max" ]; then
-    printf '[%s] on-message SKIPPED (inflight=%s >= cap=%s) bus=%s from=%s\n' \
-      "$(buses::now_iso)" "$inflight" "$om_inflight_max" "$bus" "$from" \
+    printf '[%s] on-message SKIPPED (inflight=%s >= cap=%s) beam=%s from=%s\n' \
+      "$(beams::now_iso)" "$inflight" "$om_inflight_max" "$beam" "$from" \
       >>"$on_message_log"
     return 0
   fi
@@ -148,79 +148,79 @@ dispatch_on_message() {
   # values raw, and into on-message.log forensic readouts. NULs would also be
   # silently dropped by execve, but strip explicitly so the cmd sees consistent
   # bytes whether or not the kernel intervenes.
-  bus=$(printf '%s'     "$bus"     | LC_ALL=C tr -d '\000-\037\177')
+  beam=$(printf '%s'     "$beam"     | LC_ALL=C tr -d '\000-\037\177')
   from=$(printf '%s'    "$from"    | LC_ALL=C tr -d '\000-\037\177')
   preview=$(printf '%s' "$preview" | LC_ALL=C tr -d '\000-\037\177')
 
   (
-    export BUSES_BUS="$bus" BUSES_FROM="$from" BUSES_PREVIEW="$preview"
+    export BEAMS_BEAM="$beam" BEAMS_FROM="$from" BEAMS_PREVIEW="$preview"
     if [ "$have_timeout" = 1 ]; then
-      timeout "$om_timeout" bash -c "$BUSES_ON_MESSAGE_CMD" </dev/null \
+      timeout "$om_timeout" bash -c "$BEAMS_ON_MESSAGE_CMD" </dev/null \
         >>"$on_message_log" 2>&1
     else
-      bash -c "$BUSES_ON_MESSAGE_CMD" </dev/null \
+      bash -c "$BEAMS_ON_MESSAGE_CMD" </dev/null \
         >>"$on_message_log" 2>&1
     fi
     rc=$?
     if [ "$rc" -ne 0 ]; then
-      printf '[%s] on-message exit=%s bus=%s from=%s\n' \
-        "$(buses::now_iso)" "$rc" "$bus" "$from" >>"$on_message_log"
+      printf '[%s] on-message exit=%s beam=%s from=%s\n' \
+        "$(beams::now_iso)" "$rc" "$beam" "$from" >>"$on_message_log"
     fi
   ) &
 }
 
 notify() {
-  local bus="$1" from="$2" preview="$3"
+  local beam="$1" from="$2" preview="$3"
   # Strip every control character from preview before handing it to any
   # notifier, particularly to osascript -e which interprets a newline as a
   # statement terminator (would let a crafted message body break out of the
   # quoted notification string and execute AppleScript). Also strip CRs and
   # other low ASCII for safety across all notifiers.
   preview=$(printf '%s' "$preview" | tr -d '\000-\037')
-  local title="buses: ${from} on ${bus}"
-  if [ -n "${BUSES_NOTIFIER_CMD:-}" ]; then
+  local title="beams: ${from} on ${beam}"
+  if [ -n "${BEAMS_NOTIFIER_CMD:-}" ]; then
     # Intentionally invoked as a single command (no word-splitting): set
-    # BUSES_NOTIFIER_CMD to the absolute path of one executable, not a
+    # BEAMS_NOTIFIER_CMD to the absolute path of one executable, not a
     # shell snippet. Documented in README.
-    "$BUSES_NOTIFIER_CMD" "$title" "$preview" 2>/dev/null || true
+    "$BEAMS_NOTIFIER_CMD" "$title" "$preview" 2>/dev/null || true
   elif command -v notify-send >/dev/null 2>&1; then
-    notify-send -a buses -u low "$title" "$preview" 2>/dev/null || true
+    notify-send -a beams -u low "$title" "$preview" 2>/dev/null || true
   elif command -v terminal-notifier >/dev/null 2>&1; then
-    terminal-notifier -title buses -subtitle "${from} on ${bus}" -message "$preview" >/dev/null 2>&1 || true
+    terminal-notifier -title beams -subtitle "${from} on ${beam}" -message "$preview" >/dev/null 2>&1 || true
   elif command -v osascript >/dev/null 2>&1; then
     local body_esc sub_esc
     body_esc=$(printf '%s' "$preview"               | sed 's/\\/\\\\/g; s/"/\\"/g')
-    sub_esc=$(printf '%s' "${from} on ${bus}"       | sed 's/\\/\\\\/g; s/"/\\"/g')
-    osascript -e "display notification \"$body_esc\" with title \"buses\" subtitle \"$sub_esc\"" 2>/dev/null || true
+    sub_esc=$(printf '%s' "${from} on ${beam}"       | sed 's/\\/\\\\/g; s/"/\\"/g')
+    osascript -e "display notification \"$body_esc\" with title \"beams\" subtitle \"$sub_esc\"" 2>/dev/null || true
   elif command -v kdialog >/dev/null 2>&1; then
     kdialog --title "$title" --passivepopup "$preview" 8 2>/dev/null || true
   else
     : # logged below
   fi
-  echo "[$(buses::now_iso)] notify bus=$bus from=$from"
+  echo "[$(beams::now_iso)] notify beam=$beam from=$from"
 }
 
 on_message_marker="off"
-[ -n "${BUSES_ON_MESSAGE_CMD:-}" ] && \
+[ -n "${BEAMS_ON_MESSAGE_CMD:-}" ] && \
   on_message_marker="ACTIVE (timeout=${om_timeout}s, inflight_cap=${om_inflight_max})"
-echo "[$(buses::now_iso)] watcher start sid=$sid interval=${interval}s notifier=$notifier on-message=$on_message_marker pid=$$"
+echo "[$(beams::now_iso)] watcher start sid=$sid interval=${interval}s notifier=$notifier on-message=$on_message_marker pid=$$"
 
 while true; do
   # If config disappears, exit gracefully (user uninstalled, reset, etc).
-  if [ ! -f "$BUSES_CONFIG_FILE" ]; then
-    echo "[$(buses::now_iso)] watcher: config gone — exiting"
+  if [ ! -f "$BEAMS_CONFIG_FILE" ]; then
+    echo "[$(beams::now_iso)] watcher: config gone — exiting"
     cleanup
   fi
 
   # If share is temporarily unmounted, back off without crashing.
-  if [ -d "$(buses::shared_root)" ]; then
+  if [ -d "$(beams::shared_root)" ]; then
     out=$("$PLUGIN_ROOT/lib/check.sh" --notify 2>/dev/null || true)
     if [ -n "$out" ]; then
-      while IFS=$'\t' read -r bus from preview; do
-        [ -n "$bus" ] || continue
-        notify "$bus" "$from" "$preview"
-        [ -n "${BUSES_ON_MESSAGE_CMD:-}" ] && \
-          dispatch_on_message "$bus" "$from" "$preview"
+      while IFS=$'\t' read -r beam from preview; do
+        [ -n "$beam" ] || continue
+        notify "$beam" "$from" "$preview"
+        [ -n "${BEAMS_ON_MESSAGE_CMD:-}" ] && \
+          dispatch_on_message "$beam" "$from" "$preview"
       done <<< "$out"
     fi
   fi
@@ -232,7 +232,7 @@ while true; do
   log_self="${state_dir}/watcher.log"
   if [ -f "$log_self" ] && [ "$(wc -c < "$log_self" 2>/dev/null || echo 0)" -gt 1048576 ]; then
     : > "$log_self"
-    echo "[$(buses::now_iso)] watcher.log rotated (exceeded 1MB)"
+    echo "[$(beams::now_iso)] watcher.log rotated (exceeded 1MB)"
   fi
   # Skip rotation if on_message_log was replaced with a symlink — rotation's
   # `: > "$file"` follows symlinks and would truncate the attacker's chosen
@@ -241,7 +241,7 @@ while true; do
   if [ -f "$on_message_log" ] && [ ! -L "$on_message_log" ] && \
      [ "$(wc -c < "$on_message_log" 2>/dev/null || echo 0)" -gt 1048576 ]; then
     : > "$on_message_log"
-    echo "[$(buses::now_iso)] on-message.log rotated (exceeded 1MB)"
+    echo "[$(beams::now_iso)] on-message.log rotated (exceeded 1MB)"
   fi
 
   # Background sleep so SIGTERM can interrupt the wait — bare `sleep` would

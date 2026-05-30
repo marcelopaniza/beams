@@ -1,26 +1,26 @@
 #!/usr/bin/env bash
-# /buses:unlock <bus> — driver-only: clear the lock on a bus.
+# /beams:unlock <beam> — driver-only: clear the lock on a beam.
 
 set -euo pipefail
 source "$(cd "$(dirname "$0")" && pwd)/common.sh"
-buses::require jq
-buses::config_require
+beams::require jq
+beams::config_require
 
 # The matching .md command quotes "$ARGUMENTS" as a single arg for safety
 # against shell metacharacters in user input. Re-split it into positionals
 # here (whitespace-only; no shell interpretation). When tests call the
 # script directly with already-split args, $# > 1 and we leave them alone.
-[ "$#" -le 1 ] && { read -ra __buses_args <<<"${1-}"; set -- "${__buses_args[@]}"; unset __buses_args; }
+[ "$#" -le 1 ] && { read -ra __beams_args <<<"${1-}"; set -- "${__beams_args[@]}"; unset __beams_args; }
 
-bus="${1:-}"
-[ -n "$bus" ] || buses::die "usage: unlock.sh <bus>"
-buses::bus_exists "$bus" || buses::die "bus '$bus' does not exist"
-buses::is_driver "$bus"  || buses::die "only the driver of '$bus' can unlock it"
+beam="${1:-}"
+[ -n "$beam" ] || beams::die "usage: unlock.sh <beam>"
+beams::beam_exists "$beam" || beams::die "beam '$beam' does not exist"
+beams::is_driver "$beam"  || beams::die "only the driver of '$beam' can unlock it"
 
-if ! buses::is_locked "$bus"; then
-  printf 'buses: bus "%s" was not locked\n' "$bus"
+if ! beams::is_locked "$beam"; then
+  printf 'beams: beam "%s" was not locked\n' "$beam"
   exit 0
 fi
 
-buses::manifest_set "$bus" 'del(.locked)'
-printf 'buses: bus "%s" unlocked\n' "$bus"
+beams::manifest_set "$beam" 'del(.locked)'
+printf 'beams: beam "%s" unlocked\n' "$beam"

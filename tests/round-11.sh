@@ -18,7 +18,7 @@
 set -euo pipefail
 
 PLUGIN="${PLUGIN_ROOT:-$(cd "$(dirname "$0")/.." && pwd)}"
-TEST_TMPDIR=$(mktemp -d /tmp/buses-test-r11.XXXXXX)
+TEST_TMPDIR=$(mktemp -d /tmp/beams-test-r11.XXXXXX)
 SHARED="$TEST_TMPDIR/share"
 CFG_A="$TEST_TMPDIR/cfg-a"
 CFG_B="$TEST_TMPDIR/cfg-b"
@@ -35,8 +35,8 @@ cleanup() {
 }
 trap cleanup EXIT
 
-as_a() { ( export BUSES_CONFIG_DIR="$CFG_A"; "$PLUGIN/lib/$1.sh" "${@:2}" ); }
-as_b() { ( export BUSES_CONFIG_DIR="$CFG_B"; "$PLUGIN/lib/$1.sh" "${@:2}" ); }
+as_a() { ( export BEAMS_CONFIG_DIR="$CFG_A"; "$PLUGIN/lib/$1.sh" "${@:2}" ); }
+as_b() { ( export BEAMS_CONFIG_DIR="$CFG_B"; "$PLUGIN/lib/$1.sh" "${@:2}" ); }
 
 banner "1. set up two sessions on a fresh shared dir"
 mkdir -p "$SHARED"
@@ -47,7 +47,7 @@ as_b name bob         >/dev/null
 as_a create general   >/dev/null
 as_a join   general   >/dev/null
 as_b join   general   >/dev/null
-pass "alice and bob both on bus 'general'"
+pass "alice and bob both on beam 'general'"
 
 banner "2. plant a victim file with known content"
 victim_content="dont-touch-me-attacker-$(date +%s)"
@@ -67,7 +67,7 @@ banner "4. fire alice's UserPromptSubmit hook"
 # tmp path the attacker has poisoned. With pre-fix code, the write follows
 # the symlink and overwrites $VICTIM.
 (
-  export BUSES_CONFIG_DIR="$CFG_A"
+  export BEAMS_CONFIG_DIR="$CFG_A"
   export CLAUDE_PLUGIN_ROOT="$PLUGIN"
   printf '{}' | "$PLUGIN/hooks/check-messages.sh"
 ) >/dev/null 2>&1 || true

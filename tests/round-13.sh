@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Regression test for the slash-command-injection widening to /buses:lock.
+# Regression test for the slash-command-injection widening to /beams:lock.
 #
 # Bug (Opus security review 2026-05-24, "patch them all in v0.7.3"):
 #   The send.md fix was applied only to commands/send.md. All other
@@ -7,7 +7,7 @@
 #   inside a bash block remained vulnerable to the same class of attack:
 #   Claude Code substitutes $ARGUMENTS into the template text BEFORE bash
 #   parses, so $() and backticks in user-supplied reason text still fire.
-#   /buses:lock and /buses:kick were the highest-risk siblings because
+#   /beams:lock and /beams:kick were the highest-risk siblings because
 #   their `[reason...]` field is free-form text.
 #
 # Fix: route $ARGUMENTS through a quoted-delimiter heredoc piped to the
@@ -19,7 +19,7 @@
 set -euo pipefail
 
 PLUGIN="${PLUGIN_ROOT:-$(cd "$(dirname "$0")/.." && pwd)}"
-TEST_TMPDIR=$(mktemp -d /tmp/buses-test-r13.XXXXXX)
+TEST_TMPDIR=$(mktemp -d /tmp/beams-test-r13.XXXXXX)
 SHARED="$TEST_TMPDIR/share"
 CFG_A="$TEST_TMPDIR/cfg-a"
 MARKER="$TEST_TMPDIR/PWNED_via_dollar_paren"
@@ -36,9 +36,9 @@ cleanup() {
 }
 trap cleanup EXIT
 
-as_a() { ( export BUSES_CONFIG_DIR="$CFG_A"; "$PLUGIN/lib/$1.sh" "${@:2}" ); }
+as_a() { ( export BEAMS_CONFIG_DIR="$CFG_A"; "$PLUGIN/lib/$1.sh" "${@:2}" ); }
 
-banner "1. set up alice as driver of bus 'general'"
+banner "1. set up alice as driver of beam 'general'"
 mkdir -p "$SHARED"
 as_a init "$SHARED" >/dev/null
 as_a name alice     >/dev/null
@@ -66,7 +66,7 @@ substituted="${slash_block//\$ARGUMENTS/$ATTACKER_ARGS}"
 
 rm -f "$MARKER" "$MARKER_BT"
 (
-  export BUSES_CONFIG_DIR="$CFG_A"
+  export BEAMS_CONFIG_DIR="$CFG_A"
   export CLAUDE_PLUGIN_ROOT="$PLUGIN"
   bash -c "$substituted"
 ) >"$TEST_TMPDIR/lock.out" 2>"$TEST_TMPDIR/lock.err" || true
@@ -87,7 +87,7 @@ fi
 pass "no marker files; \$() and backticks were NOT expanded"
 
 banner "6. ASSERT lock manifest stored the reason verbatim"
-manifest="$SHARED/buses/general/manifest.json"
+manifest="$SHARED/beams/general/manifest.json"
 [ -f "$manifest" ] || fail "no manifest written"
 stored_reason=$(jq -r '.locked.reason // ""' "$manifest")
 if [ "$stored_reason" = "$ATTACKER_REASON" ]; then
@@ -99,4 +99,4 @@ else
 fi
 
 green ""
-green "round-13 PASS: /buses:lock resists slash-command injection"
+green "round-13 PASS: /beams:lock resists slash-command injection"

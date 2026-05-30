@@ -1,17 +1,17 @@
 #!/usr/bin/env bash
 # SessionStart hook: when a Claude Code session starts (or resumes / clears),
-# surface any unread bus messages addressed to this session as context — the
+# surface any unread beam messages addressed to this session as context — the
 # same zero-token-when-idle pull the UserPromptSubmit hook does, just at boot,
-# so the session greets you already aware of the bus. Silent + ~0 tokens when
+# so the session greets you already aware of the beam. Silent + ~0 tokens when
 # there's nothing waiting; never blocks or fails session start.
 #
 # Opt-in extra: if this session set react.watch_on_boot=true (e.g. via
-# `/buses:init --profile responder`), also start the background notifier daemon
+# `/beams:init --profile responder`), also start the background notifier daemon
 # idempotently — so desktop notifications / the Channels bridge come up without
-# the user remembering `/buses:watch start`.
+# the user remembering `/beams:watch start`.
 #
 # Like the other hooks, a missing config (a terminal that never ran
-# /buses:init) makes this a silent no-op: buses stays invisible to non-users.
+# /beams:init) makes this a silent no-op: beams stays invisible to non-users.
 
 set -uo pipefail
 
@@ -30,7 +30,7 @@ cat >/dev/null 2>&1 || true
   # SessionStart fires once per session, so we can afford the real thing.)
   # shellcheck source=../lib/common.sh
   source "$root/lib/common.sh" 2>/dev/null || exit 0
-  buses::config_exists || exit 0   # not a buses session → stay silent
+  beams::config_exists || exit 0   # not a beams session → stay silent
 
   # Pull unread FIRST — this advances the NOTIFY cursor too, so the notifier
   # daemon we may start next won't re-notify messages we just surfaced at boot.
@@ -38,10 +38,10 @@ cat >/dev/null 2>&1 || true
 
   # Opt-in: bring up the notifier daemon on boot. Idempotent (watch.sh no-ops
   # when one is already running), detached, and fully silenced so its "watcher
-  # started" line never leaks into the session context. Pin BUSES_CONFIG_DIR so
+  # started" line never leaks into the session context. Pin BEAMS_CONFIG_DIR so
   # the daemon resolves the exact same identity this hook just did.
-  if [ "$(buses::react_flag watch_on_boot)" = "true" ]; then
-    export BUSES_CONFIG_DIR
+  if [ "$(beams::react_flag watch_on_boot)" = "true" ]; then
+    export BEAMS_CONFIG_DIR
     nohup bash "$root/lib/watch.sh" start >/dev/null 2>&1 </dev/null &
     disown 2>/dev/null || true
   fi

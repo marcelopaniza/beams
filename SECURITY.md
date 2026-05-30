@@ -16,7 +16,7 @@ Open a **private** security advisory via GitHub's "Report a vulnerability" flow 
 - Affected version (the version lives in `.claude-plugin/plugin.json`).
 - A minimal reproduction — ideally a shell snippet.
 - Expected vs observed behaviour.
-- Who needs what access to exploit: a non-member of the bus, an authenticated rider, or someone with raw write access to the shared folder. That access tier directly maps to severity.
+- Who needs what access to exploit: a non-member of the beam, an authenticated rider, or someone with raw write access to the shared folder. That access tier directly maps to severity.
 
 Acknowledgement within 72 hours; patch within 7 days for confirmed issues, longer for design changes.
 
@@ -27,14 +27,14 @@ The full table is in the [README's "Identity & security" section](README.md#iden
 - **Forge a message claiming to be from another rider** → defended by Ed25519 signatures. An attacker with raw write access to the shared folder cannot impersonate a member because they don't have the member's private key.
 - **Prompt-inject the model via a crafted message** → defended in the model-facing renderers (`--hook` and `--inject`): bodies XML-escaped, C0/C1 control bytes stripped, per-run nonce on `--inject` fences.
 - **Path traversal via terminal-pane env vars (`TMUX_PANE` etc.)** → defended by sanitising the value and rejecting `.`, `..`, leading `-`, leading `.`, and `..` substrings.
-- **Read your messages off the share as another UNIX user** → defended by `umask 077` + bus-dir mode `0700`. Defends against accidental disclosure to other local users; does **not** defend against root, filesystem snapshots, or the share host operator.
+- **Read your messages off the share as another UNIX user** → defended by `umask 077` + beam-dir mode `0700`. Defends against accidental disclosure to other local users; does **not** defend against root, filesystem snapshots, or the share host operator.
 - **Replay** (drop an old signed message back onto the share) → partial: cursor prevents re-delivery to receivers who already saw it, but new subscribers will see replayed history. Sequence numbers are on the roadmap.
 
 ## Out of scope
 
 - An insider with raw write access to the shared folder kicking/locking/transferring driver maliciously. The driver protocol is **cooperative** — defended at the social layer, not the technical one. Use filesystem ACLs if you need stronger guarantees.
-- **Encrypted message bodies.** Not implemented. Bodies are signed (authenticity, integrity) but not encrypted (confidentiality). Treat the bus like a logged group chat: do not send secrets on it.
-- A malicious local user with shell access on the machine. Ed25519 private keys live in `$BUSES_CONFIG_DIR/identity.key` at mode `0600`. A user with sufficient privilege can read them. Treat them like SSH keys.
+- **Encrypted message bodies.** Not implemented. Bodies are signed (authenticity, integrity) but not encrypted (confidentiality). Treat the beam like a logged group chat: do not send secrets on it.
+- A malicious local user with shell access on the machine. Ed25519 private keys live in `$BEAMS_CONFIG_DIR/identity.key` at mode `0600`. A user with sufficient privilege can read them. Treat them like SSH keys.
 
 ## Responsible disclosure preference
 

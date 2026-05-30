@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# /buses:watch — dispatcher for the background notification daemon.
+# /beams:watch — dispatcher for the background notification daemon.
 # Subcommands:
 #   start [interval]   start the watcher (default: 5s, or last saved interval)
 #   stop               stop a running watcher
@@ -9,8 +9,8 @@
 
 set -euo pipefail
 source "$(cd "$(dirname "$0")" && pwd)/common.sh"
-buses::require jq
-buses::config_require
+beams::require jq
+beams::config_require
 
 # The matching .md command quotes "$ARGUMENTS" as a single arg for safety
 # against shell metacharacters in user input. Re-split it into positionals
@@ -26,21 +26,21 @@ buses::config_require
 # ` --on-message ` cannot appear inside the cmd (workaround: write a wrapper
 # script and pass its path).
 [ "$#" -le 1 ] && {
-  __buses_raw="${1-}"
-  __buses_marker=" --on-message "
-  if [[ "$__buses_raw" == *"$__buses_marker"* ]]; then
-    __buses_pre="${__buses_raw%%${__buses_marker}*}"
-    __buses_cmd="${__buses_raw#*${__buses_marker}}"
-    read -ra __buses_args <<<"$__buses_pre"
-    set -- "${__buses_args[@]}" --on-message "$__buses_cmd"
-  elif [[ "$__buses_raw" == --on-message\ * ]]; then
-    __buses_cmd="${__buses_raw#--on-message }"
-    set -- --on-message "$__buses_cmd"
+  __beams_raw="${1-}"
+  __beams_marker=" --on-message "
+  if [[ "$__beams_raw" == *"$__beams_marker"* ]]; then
+    __beams_pre="${__beams_raw%%${__beams_marker}*}"
+    __beams_cmd="${__beams_raw#*${__beams_marker}}"
+    read -ra __beams_args <<<"$__beams_pre"
+    set -- "${__beams_args[@]}" --on-message "$__beams_cmd"
+  elif [[ "$__beams_raw" == --on-message\ * ]]; then
+    __beams_cmd="${__beams_raw#--on-message }"
+    set -- --on-message "$__beams_cmd"
   else
-    read -ra __buses_args <<<"$__buses_raw"
-    set -- "${__buses_args[@]}"
+    read -ra __beams_args <<<"$__beams_raw"
+    set -- "${__beams_args[@]}"
   fi
-  unset __buses_args __buses_raw __buses_marker __buses_pre __buses_cmd
+  unset __beams_args __beams_raw __beams_marker __beams_pre __beams_cmd
 }
 
 # Extract --on-message into a script-global before subcommand dispatch.
@@ -49,29 +49,29 @@ buses::config_require
 # pass --on-message at all" (fine).
 on_message_cmd=""
 on_message_seen=0
-__buses_positional=()
+__beams_positional=()
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --on-message)
       shift
-      [ "$#" -ge 1 ] || { echo "buses: --on-message requires a command argument" >&2; exit 1; }
+      [ "$#" -ge 1 ] || { echo "beams: --on-message requires a command argument" >&2; exit 1; }
       on_message_cmd="$1"
       on_message_seen=1
       shift
       ;;
     *)
-      __buses_positional+=("$1")
+      __beams_positional+=("$1")
       shift
       ;;
   esac
 done
-set -- "${__buses_positional[@]}"
-unset __buses_positional
+set -- "${__beams_positional[@]}"
+unset __beams_positional
 
 # Empty cmd is treated as a usage error: silent-discard ("flag accepted but
 # ignored") would mask typos like `--on-message ""` or `--on-message $UNSET`.
 if [ "$on_message_seen" = 1 ] && [ -z "$on_message_cmd" ]; then
-  echo "buses: --on-message argument cannot be empty" >&2
+  echo "beams: --on-message argument cannot be empty" >&2
   exit 1
 fi
 
@@ -79,10 +79,10 @@ sub="${1:-start}"; shift || true
 
 # --on-message only meaningful at start / restart.
 if [ "$on_message_seen" = 1 ] && [ "$sub" != "start" ] && [ "$sub" != "restart" ]; then
-  buses::die "--on-message is only valid with start or restart, not '$sub'"
+  beams::die "--on-message is only valid with start or restart, not '$sub'"
 fi
 
-state_dir=$(buses::state_dir)
+state_dir=$(beams::state_dir)
 mkdir -p "$state_dir"
 pid_file="$state_dir/watcher.pid"
 log_file="$state_dir/watcher.log"
@@ -102,20 +102,20 @@ cmd_start() {
     interval=$(cat "$interval_file" 2>/dev/null || echo 5)
   fi
   [ -n "$interval" ] || interval=5
-  case "$interval" in ''|*[!0-9]*) buses::die "interval must be a positive integer (seconds)" ;; esac
-  [ "$interval" -ge 1 ] || buses::die "interval must be >= 1 second"
+  case "$interval" in ''|*[!0-9]*) beams::die "interval must be a positive integer (seconds)" ;; esac
+  [ "$interval" -ge 1 ] || beams::die "interval must be >= 1 second"
 
   # Mkdir-based lock around the start sequence. mkdir is atomic on every
   # POSIX filesystem we care about, so this serialises concurrent
-  # /buses:watch start calls in the same $BUSES_CONFIG_DIR. Without it,
+  # /beams:watch start calls in the same $BEAMS_CONFIG_DIR. Without it,
   # two terminals starting the watcher within the 0.4s sanity sleep can
   # both launch a daemon and stomp on the PID file (one daemon stays
-  # orphaned and unreachable by /buses:watch stop).
+  # orphaned and unreachable by /beams:watch stop).
   local lock_dir="$state_dir/watcher.lock"
   local i=0
   while ! mkdir "$lock_dir" 2>/dev/null; do
     i=$((i + 1))
-    [ "$i" -gt 50 ] && buses::die "couldn't acquire watcher start lock at $lock_dir (stuck? rmdir it manually)"
+    [ "$i" -gt 50 ] && beams::die "couldn't acquire watcher start lock at $lock_dir (stuck? rmdir it manually)"
     sleep 0.1
   done
   # shellcheck disable=SC2064
@@ -124,7 +124,7 @@ cmd_start() {
   if is_alive; then
     local running_interval='?'
     [ -f "$interval_file" ] && running_interval=$(cat "$interval_file" 2>/dev/null)
-    printf 'buses: watcher already running (pid=%s, interval=%ss)\n' \
+    printf 'beams: watcher already running (pid=%s, interval=%ss)\n' \
       "$(cat "$pid_file")" "$running_interval"
     return 0
   fi
@@ -135,13 +135,13 @@ cmd_start() {
   # /dev/null so it never blocks on terminal input. --on-message snippet is
   # passed via env, not argv: it stays out of `ps` listings and out of the
   # nohup-redirected log file. (Same-UID peers can still read /proc/$pid/environ
-  # — that's consistent with the existing threat model where $BUSES_CONFIG_DIR
+  # — that's consistent with the existing threat model where $BEAMS_CONFIG_DIR
   # is already same-UID readable.)
-  export BUSES_CONFIG_DIR
+  export BEAMS_CONFIG_DIR
   if [ -n "$on_message_cmd" ]; then
-    export BUSES_ON_MESSAGE_CMD="$on_message_cmd"
+    export BEAMS_ON_MESSAGE_CMD="$on_message_cmd"
   else
-    unset BUSES_ON_MESSAGE_CMD
+    unset BEAMS_ON_MESSAGE_CMD
   fi
   nohup bash "$PLUGIN_ROOT/lib/watcher_daemon.sh" "$interval" \
     >> "$log_file" 2>&1 < /dev/null &
@@ -150,24 +150,24 @@ cmd_start() {
 
   sleep 0.4
   if ! kill -0 "$pid" 2>/dev/null; then
-    buses::err "watcher exited immediately. Last log lines:"
+    beams::err "watcher exited immediately. Last log lines:"
     tail -n 20 "$log_file" >&2 || true
     rm -f "$pid_file"
     exit 1
   fi
 
   if [ -n "$on_message_cmd" ]; then
-    printf 'buses: watcher started (pid=%s, interval=%ss, on-message=ACTIVE, log=%s)\n' \
+    printf 'beams: watcher started (pid=%s, interval=%ss, on-message=ACTIVE, log=%s)\n' \
       "$pid" "$interval" "$log_file"
   else
-    printf 'buses: watcher started (pid=%s, interval=%ss, log=%s)\n' "$pid" "$interval" "$log_file"
+    printf 'beams: watcher started (pid=%s, interval=%ss, log=%s)\n' "$pid" "$interval" "$log_file"
   fi
 }
 
 cmd_stop() {
   if ! is_alive; then
     rm -f "$pid_file"
-    printf 'buses: watcher was not running\n'
+    printf 'beams: watcher was not running\n'
     return 0
   fi
   local p; p=$(cat "$pid_file")
@@ -182,7 +182,7 @@ cmd_stop() {
     sleep 0.2
   fi
   rm -f "$pid_file"
-  printf 'buses: watcher stopped (was pid=%s)\n' "$p"
+  printf 'beams: watcher stopped (was pid=%s)\n' "$p"
 }
 
 cmd_restart() {
@@ -195,7 +195,7 @@ cmd_status() {
     local p; p=$(cat "$pid_file")
     local interval='?'
     [ -f "$interval_file" ] && interval=$(cat "$interval_file")
-    printf 'buses: watcher RUNNING\n'
+    printf 'beams: watcher RUNNING\n'
     printf '  pid:      %s\n' "$p"
     printf '  interval: %ss\n' "$interval"
     printf '  pid_file: %s\n' "$pid_file"
@@ -204,7 +204,7 @@ cmd_status() {
     # On-message status is inferred from the most recent "watcher start" line
     # in watcher.log — the daemon writes "on-message=ACTIVE (timeout=Ns,
     # inflight_cap=N)" or "on-message=off" depending on whether
-    # BUSES_ON_MESSAGE_CMD was exported at boot. This sidesteps the Linux-only
+    # BEAMS_ON_MESSAGE_CMD was exported at boot. This sidesteps the Linux-only
     # /proc/$pid/environ readback.
     local on_msg="unknown"
     if [ -f "$log_file" ]; then
@@ -236,7 +236,7 @@ cmd_status() {
       tail -n 5 "$log_file" | sed 's/^/    /'
     fi
   else
-    printf 'buses: watcher NOT RUNNING\n'
+    printf 'beams: watcher NOT RUNNING\n'
     [ -f "$log_file" ] && {
       printf '  last log (tail 5):\n'
       tail -n 5 "$log_file" | sed 's/^/    /'
@@ -250,7 +250,7 @@ cmd_logs() {
   if [ -f "$log_file" ]; then
     tail -n "$n" "$log_file"
   else
-    printf 'buses: no watcher log at %s\n' "$log_file"
+    printf 'beams: no watcher log at %s\n' "$log_file"
   fi
 }
 
@@ -260,5 +260,5 @@ case "$sub" in
   restart) cmd_restart "$@" ;;
   status)  cmd_status ;;
   logs)    cmd_logs    "$@" ;;
-  *) buses::die "unknown subcommand: $sub (use: start|stop|restart|status|logs)" ;;
+  *) beams::die "unknown subcommand: $sub (use: start|stop|restart|status|logs)" ;;
 esac

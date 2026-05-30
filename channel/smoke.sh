@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# smoke.sh — best-effort smoke test for buses-channel.mjs.
+# smoke.sh — best-effort smoke test for beams-channel.mjs.
 #
 # Starts the channel server with stdin kept alive via a background writer
 # process, drives it through a sequence of JSON-RPC and HTTP checks, and
@@ -13,8 +13,10 @@
 #   5. GET /health          → "ok"
 #   6. POST valid token     → notifications/claude/channel emitted on stdout
 #   7. POST wrong token     → HTTP 403, no notification on stdout
-#   8. Content sanitization → C0/DEL control chars stripped from body
+#   8. Content sanitization → C0/DEL + angle brackets stripped from body
 #   9. Notification (no id) → no stdout response emitted
+#  10. Oversized body (>8KB) → HTTP 413, no notification leaked
+#  11. Meta sanitization    → non-identifier chars stripped from beam/from
 #
 # Uses a random high port to avoid clashes with other runs.
 # Temp files and the server process are cleaned up on exit.
@@ -23,7 +25,7 @@ set -euo pipefail
 
 NODE="${NODE:-/usr/bin/node}"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-SERVER="$SCRIPT_DIR/buses-channel.mjs"
+SERVER="$SCRIPT_DIR/beams-channel.mjs"
 
 # Random port in range 20000-29999.
 PORT=$(( 20000 + RANDOM % 10000 ))
@@ -48,7 +50,7 @@ FAIL=0
 ok()   { echo "  PASS: $*"; PASS=$(( PASS + 1 )); }
 fail() { echo "  FAIL: $*"; FAIL=$(( FAIL + 1 )); }
 
-echo "=== buses-channel smoke test (port=$PORT) ==="
+echo "=== beams-channel smoke test (port=$PORT) ==="
 
 # ---------------------------------------------------------------------------
 # Build the stdin feed for the server.
@@ -63,18 +65,18 @@ echo "=== buses-channel smoke test (port=$PORT) ==="
 # blocks until at least one writer holds the write-end.  We therefore open
 # the write-end in the background FIRST, then start the server.
 # ---------------------------------------------------------------------------
-RPC_PIPE=$(mktemp -u /tmp/buses-smoke-pipe.XXXXXX)
+RPC_PIPE=$(mktemp -u /tmp/beams-smoke-pipe.XXXXXX)
 mkfifo "$RPC_PIPE"
 
-TMP_OUT=$(mktemp /tmp/buses-smoke-out.XXXXXX)
+TMP_OUT=$(mktemp /tmp/beams-smoke-out.XXXXXX)
 
 # Open the write-end first to unblock the server's read-end open.
 # This writer sleeps until we kill it; we kill it at the end to signal EOF.
 ( sleep 300 ) >"$RPC_PIPE" &
 WRITER_PID=$!
 
-export BUSES_CHANNEL_PORT="$PORT"
-export BUSES_CHANNEL_TOKEN="$TOKEN"
+export BEAMS_CHANNEL_PORT="$PORT"
+export BEAMS_CHANNEL_TOKEN="$TOKEN"
 
 # Now start the server — its stdin open() will succeed immediately.
 "$NODE" "$SERVER" <"$RPC_PIPE" >"$TMP_OUT" 2>/dev/null &
@@ -126,7 +128,7 @@ LINE_AFTER=$(line_count)
 if [ "$LINE_AFTER" -gt "$BASELINE" ]; then
   RESP=$(sed -n "$(( BASELINE + 1 ))p" "$TMP_OUT")
   echo "$RESP" | grep -q '"claude/channel"'       && ok 'initialize: claude/channel capability present'  || fail "initialize: missing claude/channel — $RESP"
-  echo "$RESP" | grep -q '"buses"'                && ok 'initialize: serverInfo.name="buses"'           || fail "initialize: missing serverInfo.name — $RESP"
+  echo "$RESP" | grep -q '"beams"'                && ok 'initialize: serverInfo.name="beams"'           || fail "initialize: missing serverInfo.name — $RESP"
   echo "$RESP" | grep -q '"protocolVersion"'      && ok 'initialize: protocolVersion echoed'            || fail "initialize: missing protocolVersion — $RESP"
   BASELINE="$LINE_AFTER"
 else
@@ -192,9 +194,9 @@ HEALTH=$(curl -s -m 5 "http://127.0.0.1:${PORT}/health")
 echo ""
 echo "--- 6. POST with valid token ---"
 HTTP_CODE=$(curl -s -o /dev/null -w '%{http_code}' -m 5 -X POST \
-  -H "x-buses-token: $TOKEN" \
-  -H "x-buses-bus: testbus" \
-  -H "x-buses-from: smoketest" \
+  -H "x-beams-token: $TOKEN" \
+  -H "x-beams-beam: testbeam" \
+  -H "x-beams-from: smoketest" \
   --data-binary "hello from smoke test" \
   "http://127.0.0.1:${PORT}/")
 sleep 0.2
@@ -205,7 +207,7 @@ LINE_AFTER=$(line_count)
 if [ "$LINE_AFTER" -gt "$BASELINE" ]; then
   RESP=$(sed -n "$(( BASELINE + 1 ))p" "$TMP_OUT")
   echo "$RESP" | grep -q '"notifications/claude/channel"'  && ok 'POST: notifications/claude/channel emitted'  || fail "POST: wrong method on stdout — $RESP"
-  echo "$RESP" | grep -q '"testbus"'                       && ok 'POST: meta.bus="testbus"'                   || fail "POST: missing bus in meta — $RESP"
+  echo "$RESP" | grep -q '"testbeam"'                       && ok 'POST: meta.beam="testbeam"'                   || fail "POST: missing beam in meta — $RESP"
   echo "$RESP" | grep -q '"smoketest"'                     && ok 'POST: meta.from="smoketest"'                || fail "POST: missing from in meta — $RESP"
   echo "$RESP" | grep -q '"hello from smoke test"'         && ok 'POST: content forwarded'                   || fail "POST: content missing — $RESP"
   BASELINE="$LINE_AFTER"
@@ -220,7 +222,7 @@ echo ""
 echo "--- 7. POST with wrong token ---"
 PRE="$BASELINE"
 BAD_CODE=$(curl -s -o /dev/null -w '%{http_code}' -m 5 -X POST \
-  -H "x-buses-token: definitely_wrong_token" \
+  -H "x-beams-token: definitely_wrong_token" \
   --data-binary "injected" \
   "http://127.0.0.1:${PORT}/")
 sleep 0.2
@@ -246,15 +248,15 @@ BASELINE=$(line_count)
 echo ""
 echo "--- 8. Content sanitization ---"
 curl -s -o /dev/null -m 5 -X POST \
-  -H "x-buses-token: $TOKEN" \
-  -H "x-buses-bus: sanitest" \
-  --data-binary $'hello\x01\x1fworld\x7f' \
+  -H "x-beams-token: $TOKEN" \
+  -H "x-beams-beam: sanitest" \
+  --data-binary $'hel<lo>\x01\x1fworld\x7f' \
   "http://127.0.0.1:${PORT}/"
 sleep 0.2
 LINE_AFTER=$(line_count)
 if [ "$LINE_AFTER" -gt "$BASELINE" ]; then
   RESP=$(sed -n "$(( BASELINE + 1 ))p" "$TMP_OUT")
-  echo "$RESP" | grep -q '"helloworld"'  && ok 'sanitize: C0+DEL stripped from body'  || fail "sanitize: unexpected content — $RESP"
+  echo "$RESP" | grep -q '"helloworld"'  && ok 'sanitize: C0/DEL + angle brackets stripped from body'  || fail "sanitize: unexpected content — $RESP"
   BASELINE="$LINE_AFTER"
 else
   fail 'sanitize: no stdout line emitted'
@@ -272,6 +274,44 @@ if [ "$LINE_AFTER" -gt "$PRE" ]; then
   fail 'incoming notification (no id): unexpected stdout output'
 else
   ok 'incoming notification (no id): handled silently'
+fi
+
+# ---------------------------------------------------------------------------
+# 10. Oversized body (>8192 bytes) → HTTP 413, no notification
+# ---------------------------------------------------------------------------
+echo ""
+echo "--- 10. Oversized body → 413 ---"
+PRE=$(line_count)
+BIG=$(head -c 9000 /dev/zero | tr '\0' 'a')
+BIG_CODE=$(curl -s -o /dev/null -w '%{http_code}' -m 5 -X POST \
+  -H "x-beams-token: $TOKEN" \
+  --data-binary "$BIG" \
+  "http://127.0.0.1:${PORT}/")
+sleep 0.2
+[ "$BIG_CODE" = "413" ]                && ok 'oversized body → HTTP 413'                || fail "oversized body → HTTP $BIG_CODE (expected 413)"
+[ "$(line_count)" -eq "$PRE" ]         && ok 'oversized body: no notification leaked'  || fail 'oversized body: a notification leaked to stdout'
+BASELINE=$(line_count)
+
+# ---------------------------------------------------------------------------
+# 11. Meta sanitization — non-identifier chars stripped from beam/from headers
+# ---------------------------------------------------------------------------
+echo ""
+echo "--- 11. Meta header sanitization ---"
+curl -s -o /dev/null -m 5 -X POST \
+  -H "x-beams-token: $TOKEN" \
+  -H "x-beams-beam: bad-beam.name!" \
+  -H "x-beams-from: user@host/x" \
+  --data-binary "meta check" \
+  "http://127.0.0.1:${PORT}/"
+sleep 0.2
+LINE_AFTER=$(line_count)
+if [ "$LINE_AFTER" -gt "$BASELINE" ]; then
+  RESP=$(sed -n "$(( BASELINE + 1 ))p" "$TMP_OUT")
+  echo "$RESP" | grep -q '"badbeamname"'  && ok 'meta: beam stripped to identifier chars'  || fail "meta: beam not sanitized — $RESP"
+  echo "$RESP" | grep -q '"userhostx"'     && ok 'meta: from stripped to identifier chars'  || fail "meta: from not sanitized — $RESP"
+  BASELINE="$LINE_AFTER"
+else
+  fail 'meta sanitization: no stdout line emitted'
 fi
 
 # ---------------------------------------------------------------------------

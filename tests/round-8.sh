@@ -5,12 +5,12 @@
 #   - canonical NUL separation (newlines in fields can't collide canonicals)
 #   - @-mention regex escape (names with `.` no longer wildcard-match)
 #   - TOCTOU between validate and render (file content captured once)
-#   - per-bus require_signatures policy
+#   - per-beam require_signatures policy
 #   - watcher start mkdir-lock (concurrent starts serialise)
 set -euo pipefail
 
 PLUGIN="${PLUGIN_ROOT:-$(cd "$(dirname "$0")/.." && pwd)}"
-TMPDIR=$(mktemp -d /tmp/buses-test8.XXXXXX)
+TMPDIR=$(mktemp -d /tmp/beams-test8.XXXXXX)
 SHARED="$TMPDIR/share"
 
 red()    { printf '\033[31m%s\033[0m\n' "$*"; }
@@ -20,9 +20,9 @@ fail()   { red "FAIL: $*"; exit 1; }
 pass()   { green "PASS: $*"; }
 trap 'rm -rf "$TMPDIR"; for p in $TMPDIR/cfg-*/state/*/watcher.pid; do [ -f "$p" ] && kill "$(cat "$p")" 2>/dev/null || true; done' EXIT
 
-as() { ( export BUSES_CONFIG_DIR="$1"; "$PLUGIN/lib/$2.sh" "${@:3}" ); }
+as() { ( export BEAMS_CONFIG_DIR="$1"; "$PLUGIN/lib/$2.sh" "${@:3}" ); }
 ctx() {
-  ( export BUSES_CONFIG_DIR="$1"; export CLAUDE_PLUGIN_ROOT="$PLUGIN"
+  ( export BEAMS_CONFIG_DIR="$1"; export CLAUDE_PLUGIN_ROOT="$PLUGIN"
     "$PLUGIN/hooks/check-messages.sh" </dev/null
   ) | jq -r '.hookSpecificOutput.additionalContext // ""'
 }
@@ -39,7 +39,7 @@ as "$TMPDIR/cfg-a" join general >/dev/null
 as "$TMPDIR/cfg-b" join general >/dev/null
 
 banner "1. base64 portability: pubkey is single-line"
-pub=$(jq -r .public_key "$SHARED/buses/general/members/$SID_A.json")
+pub=$(jq -r .public_key "$SHARED/beams/general/members/$SID_A.json")
 case "$pub" in
   *$'\n'*) fail "pubkey is multi-line — base64 -w0 leak (would break on macOS)" ;;
   *) pass "pubkey is single-line (${#pub} chars)" ;;
@@ -52,9 +52,9 @@ banner "2. fm_field prefix-collision guard: 'from' does NOT read 'from_name'"
 # must read 'from' correctly.
 fm="from_name: alice
 from: ${SID_A}
-bus: general
+beam: general
 ts: 2026-05-17T15:46:56Z"
-val=$( . "$PLUGIN/lib/common.sh"; buses::fm_field "$fm" from )
+val=$( . "$PLUGIN/lib/common.sh"; beams::fm_field "$fm" from )
 [ "$val" = "$SID_A" ] || fail "fm_field 'from' returned '$val' (likely matched from_name)"
 pass "fm_field correctly disambiguates 'from' from 'from_name'"
 
@@ -68,7 +68,7 @@ echo "$c" | grep -q "ts-test" \
 pass "ts with colons round-trips and signature verifies"
 
 banner "4. @-mention regex escape: a name with '.' doesn't wildcard-match"
-# Give alice a dotted name on a fresh bus to avoid disturbing 'general'.
+# Give alice a dotted name on a fresh beam to avoid disturbing 'general'.
 as "$TMPDIR/cfg-a" create dotted >/dev/null
 as "$TMPDIR/cfg-a" join dotted >/dev/null
 as "$TMPDIR/cfg-b" join dotted >/dev/null
@@ -105,8 +105,8 @@ sleep 1
 # Race: simulate the swap BEFORE bob's hook runs.
 # (In real life, the bob hook would atomically cat then validate; this test
 # verifies that the validate logic reads from the in-memory content.)
-last=$(ls -t "$SHARED/buses/general/messages/"*.msg | head -1)
-backup="/tmp/buses-test8-orig.msg"
+last=$(ls -t "$SHARED/beams/general/messages/"*.msg | head -1)
+backup="/tmp/beams-test8-orig.msg"
 cp "$last" "$backup"
 # Hostile mutation (invalid signature now, but render still happens from
 # cached content): replace body line.
@@ -129,14 +129,14 @@ as "$TMPDIR/cfg-b" join strict >/dev/null
 # Synthesise a fake unsigned-eligible member (no public_key) and an unsigned
 # message from them. With require_signatures OFF (default), bob receives.
 fake_sid="ffffffff-eeee-dddd-cccc-bbbbbbbbbbbb"
-fake_rec="$SHARED/buses/strict/members/$fake_sid.json"
+fake_rec="$SHARED/beams/strict/members/$fake_sid.json"
 jq -n --arg id "$fake_sid" --arg name "old-peer" '{id:$id, name:$name, host:"legacy", last_seen:"2026-01-01T00:00:00Z"}' > "$fake_rec"
 ts=$(date -u +%Y%m%dT%H%M%SZ)
 # Address to bob's UUID — test 4 renamed bob to "b.b", so 'bob' wouldn't match.
-cat > "$SHARED/buses/strict/messages/${ts}__faketest.msg" <<EOF
+cat > "$SHARED/beams/strict/messages/${ts}__faketest.msg" <<EOF
 ---
 id: 11111111-2222-3333-4444-555555555555
-bus: strict
+beam: strict
 from: $fake_sid
 ts: $(date -u +%FT%TZ)
 to: $SID_B
@@ -149,13 +149,13 @@ echo "$c" | grep -q "unsigned-eligible body" \
   || fail "default policy should accept unsigned from no-pubkey peer"
 pass "default policy: unsigned migration message accepted"
 
-# Now flip the bus to require sigs and try again with a fresh fake unsigned msg.
+# Now flip the beam to require sigs and try again with a fresh fake unsigned msg.
 as "$TMPDIR/cfg-a" require-signatures strict on >/dev/null
 sleep 1
-cat > "$SHARED/buses/strict/messages/${ts}b__faketest2.msg" <<EOF
+cat > "$SHARED/beams/strict/messages/${ts}b__faketest2.msg" <<EOF
 ---
 id: 22222222-2222-3333-4444-555555555555
-bus: strict
+beam: strict
 from: $fake_sid
 ts: $(date -u +%FT%TZ)
 to: $SID_B
@@ -185,19 +185,19 @@ case "$out" in *driver*) pass "non-driver toggle refused" ;; *) fail "wrong erro
 banner "8. watcher start mkdir-lock prevents double-start race"
 # Start two watchers concurrently from the SAME config dir. With the lock,
 # exactly one wins; the other reports "already running".
-log1=/tmp/buses-test8-w1.log
-log2=/tmp/buses-test8-w2.log
-( export BUSES_CONFIG_DIR="$TMPDIR/cfg-a"; "$PLUGIN/lib/watch.sh" start 2 > "$log1" 2>&1 ) &
-( export BUSES_CONFIG_DIR="$TMPDIR/cfg-a"; "$PLUGIN/lib/watch.sh" start 2 > "$log2" 2>&1 ) &
+log1=/tmp/beams-test8-w1.log
+log2=/tmp/beams-test8-w2.log
+( export BEAMS_CONFIG_DIR="$TMPDIR/cfg-a"; "$PLUGIN/lib/watch.sh" start 2 > "$log1" 2>&1 ) &
+( export BEAMS_CONFIG_DIR="$TMPDIR/cfg-a"; "$PLUGIN/lib/watch.sh" start 2 > "$log2" 2>&1 ) &
 wait
 combined=$(cat "$log1" "$log2")
 echo "$combined" | grep -q "watcher started"   || fail "neither watcher reported started"
 echo "$combined" | grep -q "already running"   || fail "neither watcher reported already-running"
 pids=$(ls "$TMPDIR/cfg-a/state/"*/watcher.pid 2>/dev/null | wc -l | tr -d ' ')
 [ "$pids" = "1" ] || fail "expected exactly 1 pid file, got $pids"
-( export BUSES_CONFIG_DIR="$TMPDIR/cfg-a"; "$PLUGIN/lib/watch.sh" stop >/dev/null )
+( export BEAMS_CONFIG_DIR="$TMPDIR/cfg-a"; "$PLUGIN/lib/watch.sh" stop >/dev/null )
 rm -f "$log1" "$log2"
-pass "concurrent /buses:watch start serialised correctly"
+pass "concurrent /beams:watch start serialised correctly"
 
 green ""
 green "ALL ROUND-8 TESTS PASSED"

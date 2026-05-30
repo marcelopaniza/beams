@@ -1,36 +1,36 @@
 #!/usr/bin/env bash
-# /buses:create <bus> — create a new bus on the shared folder.
+# /beams:create <beam> — create a new beam on the shared folder.
 # Idempotent: succeeds quietly if it already exists.
 
 set -euo pipefail
 source "$(cd "$(dirname "$0")" && pwd)/common.sh"
-buses::require jq
-buses::config_require
+beams::require jq
+beams::config_require
 
 # The matching .md command quotes "$ARGUMENTS" as a single arg for safety
 # against shell metacharacters in user input. Re-split it into positionals
 # here (whitespace-only; no shell interpretation). When tests call the
 # script directly with already-split args, $# > 1 and we leave them alone.
-[ "$#" -le 1 ] && { read -ra __buses_args <<<"${1-}"; set -- "${__buses_args[@]}"; unset __buses_args; }
+[ "$#" -le 1 ] && { read -ra __beams_args <<<"${1-}"; set -- "${__beams_args[@]}"; unset __beams_args; }
 
-bus="${1:-}"
-[ -n "$bus" ] || buses::die "usage: create.sh <bus>"
-buses::valid_name "$bus" || buses::die "invalid bus name: $bus"
+beam="${1:-}"
+[ -n "$beam" ] || beams::die "usage: create.sh <beam>"
+beams::valid_name "$beam" || beams::die "invalid beam name: $beam"
 
-dir=$(buses::bus_dir "$bus")
+dir=$(beams::beam_dir "$beam")
 created=no
 if [ ! -d "$dir" ]; then
-  mkdir -p "$dir/messages" "$dir/members" || buses::die "cannot create $dir (shared path writable?)"
+  mkdir -p "$dir/messages" "$dir/members" || beams::die "cannot create $dir (shared path writable?)"
   jq -n \
-    --arg n "$bus" \
-    --arg c "$(buses::now_iso)" \
-    --arg by "$(buses::config_get '.session_id')" \
+    --arg n "$beam" \
+    --arg c "$(beams::now_iso)" \
+    --arg by "$(beams::config_get '.session_id')" \
     '{name: $n, created: $c, created_by: $by, driver: $by}' > "$dir/manifest.json"
   created=yes
 fi
 # Idempotent: re-affirm 0700 perms whether we just created or it already existed.
 # Cheap defense for older shares that pre-date the umask change.
-buses::tighten_perms "$bus"
+beams::tighten_perms "$beam"
 
-printf 'buses: bus "%s" %s at %s\n' "$bus" \
+printf 'beams: beam "%s" %s at %s\n' "$beam" \
   "$([ "$created" = yes ] && echo created || echo "already existed")" "$dir"

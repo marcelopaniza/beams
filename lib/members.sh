@@ -1,24 +1,24 @@
 #!/usr/bin/env bash
-# /buses:members <bus> — list members of a bus, marking the driver and any
-# banned UUIDs. Also prints a header line if the bus is locked.
+# /beams:members <beam> — list members of a beam, marking the driver and any
+# banned UUIDs. Also prints a header line if the beam is locked.
 
 set -euo pipefail
 source "$(cd "$(dirname "$0")" && pwd)/common.sh"
-buses::require jq
-buses::config_require
+beams::require jq
+beams::config_require
 
 # The matching .md command quotes "$ARGUMENTS" as a single arg for safety
 # against shell metacharacters in user input. Re-split it into positionals
 # here (whitespace-only; no shell interpretation). When tests call the
 # script directly with already-split args, $# > 1 and we leave them alone.
-[ "$#" -le 1 ] && { read -ra __buses_args <<<"${1-}"; set -- "${__buses_args[@]}"; unset __buses_args; }
+[ "$#" -le 1 ] && { read -ra __beams_args <<<"${1-}"; set -- "${__beams_args[@]}"; unset __beams_args; }
 
-bus="${1:-}"
-[ -n "$bus" ] || buses::die "usage: members.sh <bus>"
-buses::bus_exists "$bus" || buses::die "bus '$bus' does not exist"
+beam="${1:-}"
+[ -n "$beam" ] || beams::die "usage: members.sh <beam>"
+beams::beam_exists "$beam" || beams::die "beam '$beam' does not exist"
 
-drv=$(buses::driver_uuid "$bus")
-mf=$(buses::manifest_file "$bus")
+drv=$(beams::driver_uuid "$beam")
+mf=$(beams::manifest_file "$beam")
 banned=()
 if [ -f "$mf" ]; then
   while IFS= read -r b; do
@@ -26,14 +26,14 @@ if [ -f "$mf" ]; then
   done < <(jq -r '.banned[]? // empty' "$mf" 2>/dev/null)
 fi
 
-if buses::is_locked "$bus"; then
-  reason=$(buses::lock_reason "$bus")
-  printf '[bus locked%s]\n' "${reason:+ — $reason}"
+if beams::is_locked "$beam"; then
+  reason=$(beams::lock_reason "$beam")
+  printf '[beam locked%s]\n' "${reason:+ — $reason}"
 fi
 
-mdir=$(buses::bus_members "$bus")
+mdir=$(beams::beam_members "$beam")
 if [ ! -d "$mdir" ] || [ -z "$(ls -A "$mdir" 2>/dev/null)" ]; then
-  printf 'buses: no active members in %s\n' "$bus"
+  printf 'beams: no active members in %s\n' "$beam"
 else
   printf '%-38s %-20s %-20s %-22s %s\n' SESSION_ID NAME HOST LAST_SEEN ROLE
   while IFS= read -r f; do

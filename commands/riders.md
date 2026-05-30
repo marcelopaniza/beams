@@ -1,13 +1,13 @@
 ---
-description: "List the riders of a bus (alias for /buses:members) — session id, name, host, last seen, role."
-argument-hint: "<bus-name>"
+description: "List the riders of a beam (alias for /beams:members) — session id, name, host, last seen, role."
+argument-hint: "<beam-name>"
 allowed-tools: ["Bash(${CLAUDE_PLUGIN_ROOT}/lib/members.sh:*)"]
 ---
 
 ```!
-"${CLAUDE_PLUGIN_ROOT}/lib/members.sh" "$(cat <<'BUSES_END_PAYLOAD_3f5a8c2d1b9e7f0a'
+"${CLAUDE_PLUGIN_ROOT}/lib/members.sh" "$(cat <<'BEAMS_END_PAYLOAD_3f5a8c2d1b9e7f0a'
 $ARGUMENTS
-BUSES_END_PAYLOAD_3f5a8c2d1b9e7f0a
+BEAMS_END_PAYLOAD_3f5a8c2d1b9e7f0a
 )"
 ```
 

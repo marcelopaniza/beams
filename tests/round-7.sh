@@ -3,7 +3,7 @@
 set -euo pipefail
 
 PLUGIN="${PLUGIN_ROOT:-$(cd "$(dirname "$0")/.." && pwd)}"
-TMPDIR=$(mktemp -d /tmp/buses-test7.XXXXXX)
+TMPDIR=$(mktemp -d /tmp/beams-test7.XXXXXX)
 SHARED="$TMPDIR/share"
 CFG_A="$TMPDIR/cfg-a"
 CFG_B="$TMPDIR/cfg-b"
@@ -16,9 +16,9 @@ fail()   { red "FAIL: $*"; exit 1; }
 pass()   { green "PASS: $*"; }
 trap 'rm -rf "$TMPDIR"' EXIT
 
-as() { ( export BUSES_CONFIG_DIR="$1"; "$PLUGIN/lib/$2.sh" "${@:3}" ); }
+as() { ( export BEAMS_CONFIG_DIR="$1"; "$PLUGIN/lib/$2.sh" "${@:3}" ); }
 ctx() {
-  ( export BUSES_CONFIG_DIR="$1"; export CLAUDE_PLUGIN_ROOT="$PLUGIN"
+  ( export BEAMS_CONFIG_DIR="$1"; export CLAUDE_PLUGIN_ROOT="$PLUGIN"
     "$PLUGIN/hooks/check-messages.sh" </dev/null
   ) | jq -r '.hookSpecificOutput.additionalContext // ""'
 }
@@ -39,7 +39,7 @@ as "$CFG_A" join general >/dev/null
 as "$CFG_B" join general >/dev/null
 as "$CFG_M" join general >/dev/null
 
-MSG_DIR="$SHARED/buses/general/messages"
+MSG_DIR="$SHARED/beams/general/messages"
 
 banner "1. each session has its own private key at init"
 for cfg in "$CFG_A" "$CFG_B" "$CFG_M"; do
@@ -53,9 +53,9 @@ diff -q "$CFG_A/identity.key" "$CFG_B/identity.key" >/dev/null \
 pass "3 distinct private keys, all chmod 600"
 
 banner "2. public keys are published in member records and they all differ"
-pub_a=$(jq -r .public_key "$SHARED/buses/general/members/$SID_A.json")
-pub_b=$(jq -r .public_key "$SHARED/buses/general/members/$SID_B.json")
-pub_m=$(jq -r .public_key "$SHARED/buses/general/members/$SID_M.json")
+pub_a=$(jq -r .public_key "$SHARED/beams/general/members/$SID_A.json")
+pub_b=$(jq -r .public_key "$SHARED/beams/general/members/$SID_B.json")
+pub_m=$(jq -r .public_key "$SHARED/beams/general/members/$SID_M.json")
 for p in "$pub_a" "$pub_b" "$pub_m"; do
   [ -n "$p" ] && [ "$p" != "null" ] || fail "missing pubkey in a member record"
 done
@@ -102,7 +102,7 @@ sig=$(printf '%s' "$canonical" | openssl pkeyutl -sign -inkey "$CFG_M/identity.k
 cat > "$forged" <<EOF
 ---
 id: fffffff0-aaaa-bbbb-cccc-aaaaaaaaaaaa
-bus: general
+beam: general
 from: $SID_A
 to: bob
 ts: 2026-05-17T13:00:00Z
@@ -132,7 +132,7 @@ swap="$MSG_DIR/20991231T000100Z__swap.msg"
 cat > "$swap" <<EOF
 ---
 id: aaaaaaaa-1234-1234-1234-aaaaaaaaaaaa
-bus: general
+beam: general
 from: $SID_A
 to: bob
 ts: 2026-05-17T13:00:00Z
@@ -146,16 +146,16 @@ echo "$c" | grep -q "totally different content" \
 pass "sig-swap attack rejected (sig binds to specific canonical)"
 
 banner "8. fingerprint is stable across calls within a session"
-fp1=$( export BUSES_CONFIG_DIR="$CFG_A"; . "$PLUGIN/lib/common.sh"; buses::fingerprint )
-fp2=$( export BUSES_CONFIG_DIR="$CFG_A"; . "$PLUGIN/lib/common.sh"; buses::fingerprint )
+fp1=$( export BEAMS_CONFIG_DIR="$CFG_A"; . "$PLUGIN/lib/common.sh"; beams::fingerprint )
+fp2=$( export BEAMS_CONFIG_DIR="$CFG_A"; . "$PLUGIN/lib/common.sh"; beams::fingerprint )
 [ "$fp1" = "$fp2" ] && [ -n "$fp1" ] || fail "fingerprint should be stable: $fp1 vs $fp2"
 pass "fingerprint stable: $fp1"
 
-banner "9. /buses:status shows fingerprint"
+banner "9. /beams:status shows fingerprint"
 out=$(as "$CFG_A" status)
 echo "$out" | grep -q "fingerprint:" || fail "status missing fingerprint line"
 echo "$out" | grep -q "$fp1"          || fail "status fingerprint doesn't match: got '$(echo "$out" | grep fingerprint)'"
-pass "/buses:status reveals fingerprint"
+pass "/beams:status reveals fingerprint"
 
 banner "10. ts field with colons survives the round trip (the bug that triggered round 7)"
 sleep 1

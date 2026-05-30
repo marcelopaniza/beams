@@ -1,20 +1,20 @@
 {
   "_comment": [
     "This is an EXAMPLE — copy to .mcp.json (project-level) or merge the",
-    "'buses' entry into ~/.claude.json (user-level).  For user-level config",
-    "replace './channel/buses-channel.mjs' with the absolute path to that",
-    "file, e.g. '/home/you/projects/buses/channel/buses-channel.mjs'.",
+    "'beams' entry into ~/.claude.json (user-level).  For user-level config",
+    "replace './channel/beams-channel.mjs' with the absolute path to that",
+    "file, e.g. '/home/you/projects/beams/channel/beams-channel.mjs'.",
     "",
     "After registering, launch with the development flag (required for any",
     "community plugin not yet on Anthropic's channel allowlist):",
-    "  claude --dangerously-load-development-channels server:buses",
+    "  claude --dangerously-load-development-channels server:beams",
     "",
     "See channel/README.md for the full setup and watcher wiring steps."
   ],
   "mcpServers": {
-    "buses": {
+    "beams": {
       "command": "node",
-      "args": ["./channel/buses-channel.mjs"]
+      "args": ["./channel/beams-channel.mjs"]
     }
   }
 }

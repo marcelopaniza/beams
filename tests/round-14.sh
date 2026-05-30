@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
-# Regression test for the --profile mechanism on /buses:init.
+# Regression test for the --profile mechanism on /beams:init.
 #
-# Feature (v0.7.4): /buses:init <shared> --profile <name> reads
+# Feature (v0.7.4): /beams:init <shared> --profile <name> reads
 # presets/<name>.json from the plugin root and applies overlays after the
 # standard init:
 #   - default_name (string)        → set session name
 #   - role         (string)        → write into config.json
-#   - auto_subscribe (array)       → /buses:join each bus
+#   - auto_subscribe (array)       → /beams:join each beam
 #
 # Profile name must match [A-Za-z0-9_-]+ — reject path traversal, dotfiles,
 # slashes, leading dash, etc. before touching any state.
@@ -17,7 +17,7 @@
 set -euo pipefail
 
 PLUGIN="${PLUGIN_ROOT:-$(cd "$(dirname "$0")/.." && pwd)}"
-TEST_TMPDIR=$(mktemp -d /tmp/buses-test-r14.XXXXXX)
+TEST_TMPDIR=$(mktemp -d /tmp/beams-test-r14.XXXXXX)
 SHARED="$TEST_TMPDIR/share"
 CFG="$TEST_TMPDIR/cfg"
 
@@ -33,7 +33,7 @@ cleanup() {
 trap cleanup EXIT
 
 run_init() {
-  ( export BUSES_CONFIG_DIR="$CFG"; "$PLUGIN/lib/init.sh" "$@" )
+  ( export BEAMS_CONFIG_DIR="$CFG"; "$PLUGIN/lib/init.sh" "$@" )
 }
 
 banner "1. init with --profile hermes on a fresh shared dir"
@@ -52,8 +52,8 @@ role=$(jq -r '.role // ""' "$CFG/config.json")
 [ "$role" = "hermes" ] || fail "expected role='hermes', got '$role'"
 pass "role=hermes"
 
-banner "4. auto-subscribed to bus 'all'"
-sub=$(jq -r '.buses[]? // empty' "$CFG/config.json" | sort | paste -sd ',' -)
+banner "4. auto-subscribed to beam 'all'"
+sub=$(jq -r '.beams[]? // empty' "$CFG/config.json" | sort | paste -sd ',' -)
 case ",$sub," in
   *,all,*) pass "subscribed to 'all' (full list: $sub)" ;;
   *)       fail "expected to be subscribed to 'all', got: $sub" ;;
@@ -71,7 +71,7 @@ CFG2="$TEST_TMPDIR/cfg2"
 SHARED2="$TEST_TMPDIR/share2"
 mkdir -p "$SHARED2"
 for bad in '../etc/passwd' '/abs/path' '.hidden' '-flag' 'has space' 'with;semicolon' '$(ls)'; do
-  if ( export BUSES_CONFIG_DIR="$CFG2"; "$PLUGIN/lib/init.sh" "$SHARED2" --profile "$bad" ) >/dev/null 2>&1; then
+  if ( export BEAMS_CONFIG_DIR="$CFG2"; "$PLUGIN/lib/init.sh" "$SHARED2" --profile "$bad" ) >/dev/null 2>&1; then
     fail "init accepted invalid profile name: '$bad'"
   fi
 done
@@ -82,7 +82,7 @@ banner "7. unknown profile name fails cleanly"
 CFG3="$TEST_TMPDIR/cfg3"
 SHARED3="$TEST_TMPDIR/share3"
 mkdir -p "$SHARED3"
-if ( export BUSES_CONFIG_DIR="$CFG3"; "$PLUGIN/lib/init.sh" "$SHARED3" --profile no-such-profile-xyz ) >/dev/null 2>&1; then
+if ( export BEAMS_CONFIG_DIR="$CFG3"; "$PLUGIN/lib/init.sh" "$SHARED3" --profile no-such-profile-xyz ) >/dev/null 2>&1; then
   fail "init accepted nonexistent profile name"
 fi
 [ ! -e "$CFG3/config.json" ] || fail "init created config despite unknown profile"
