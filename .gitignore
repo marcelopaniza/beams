@@ -1,0 +1,12 @@
+.DS_Store
+*.swp
+.in_use/
+
+# Belt-and-braces: never commit cryptographic material. The plugin keeps
+# private keys in $BUSES_CONFIG_DIR (outside the repo), so these patterns
+# should never match — but if someone ever moves their state into the repo
+# by mistake, the keypair stays unpushed.
+identity.key
+*.pem
+*.key
+config.json

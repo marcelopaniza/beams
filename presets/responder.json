@@ -1,0 +1,7 @@
+{
+  "_comment": "Responder preset — for an autonomous AI bridge/responder session that should react to bus traffic without the user typing. Enables the proactive hooks: starts the notifier daemon on boot (watch_on_boot) and uses the Stop hook to surface/handle messages that arrive mid-turn (on_stop). Pair with the Channels layer (see channel/README.md) for true idle-wake. Used by /buses:init --profile responder. See README 'Profiles' + 'Proactive delivery' sections.",
+  "default_name": "responder",
+  "role": "responder",
+  "auto_subscribe": ["all"],
+  "react": { "watch_on_boot": true, "on_stop": true }
+}

@@ -1,0 +1,336 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>buses — hero</title>
+<style>
+  :root {
+    --bg-0: #0a0d14;
+    --bg-1: #11151f;
+    --bg-2: #1a1f2c;
+    --bg-3: #232938;
+    --line: #2a3142;
+    --ink: #c9d1d9;
+    --ink-dim: #7d8a9d;
+    --ink-bright: #f0f6fc;
+    --claude:   #d97757;
+    --codex:    #34d399;
+    --gemini:   #a78bfa;
+    --deepseek: #3b82f6;
+    --bus:      #fbbf24;
+    --good:     #7ee787;
+  }
+
+  * { box-sizing: border-box; }
+
+  html, body {
+    margin: 0; padding: 0;
+    background: var(--bg-0);
+    font-family: 'Inter', -apple-system, 'Segoe UI', Roboto, sans-serif;
+    color: var(--ink);
+  }
+
+  .canvas {
+    width: 1600px;
+    height: 800px;
+    position: relative;
+    overflow: hidden;
+    background:
+      radial-gradient(ellipse at 20% 15%, rgba(217, 119, 87, 0.10), transparent 55%),
+      radial-gradient(ellipse at 50% 15%, rgba(52, 211, 153, 0.07), transparent 55%),
+      radial-gradient(ellipse at 80% 15%, rgba(167, 139, 250, 0.10), transparent 55%),
+      radial-gradient(ellipse at 50% 90%, rgba(251, 191, 36, 0.08), transparent 50%),
+      var(--bg-0);
+  }
+
+  .canvas::before {
+    content: '';
+    position: absolute; inset: 0;
+    background-image: radial-gradient(rgba(255,255,255,0.04) 1px, transparent 1px);
+    background-size: 24px 24px;
+    pointer-events: none;
+  }
+
+  /* ── HEADER ─────────────────────────────────────────────────── */
+  .header {
+    display: flex; justify-content: space-between; align-items: center;
+    padding: 36px 60px 0 60px;
+    position: relative; z-index: 2;
+  }
+
+  .brand {
+    display: flex; align-items: baseline; gap: 14px;
+  }
+  .logo-mark {
+    font-family: 'JetBrains Mono', 'DejaVu Sans Mono', monospace;
+    font-size: 44px;
+    color: var(--bus);
+    letter-spacing: -1px;
+  }
+  .logo-word {
+    font-size: 48px;
+    font-weight: 800;
+    color: var(--ink-bright);
+    letter-spacing: -1.5px;
+  }
+
+  .tagline {
+    text-align: right;
+    color: var(--ink);
+  }
+  .tagline-1 {
+    font-size: 24px;
+    font-weight: 600;
+    color: var(--ink-bright);
+  }
+  .tagline-2 {
+    font-size: 15px;
+    font-weight: 400;
+    color: var(--ink-dim);
+    margin-top: 6px;
+    font-family: 'JetBrains Mono', 'DejaVu Sans Mono', monospace;
+  }
+
+  /* ── TERMINAL ROW (4 cards) ─────────────────────────────────── */
+  .terminals {
+    display: flex; justify-content: center; gap: 24px;
+    margin-top: 44px;
+    position: relative; z-index: 2;
+  }
+
+  .terminal {
+    width: 360px;
+    height: 320px;
+    background: var(--bg-1);
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    overflow: hidden;
+    box-shadow:
+      0 24px 40px -16px rgba(0,0,0,0.6),
+      0 0 0 1px rgba(255,255,255,0.02) inset;
+    position: relative;
+  }
+  .terminal.claude   { border-top: 3px solid var(--claude);   box-shadow: 0 24px 40px -16px rgba(0,0,0,0.6), 0 -8px 32px -10px rgba(217,119,87,0.35); }
+  .terminal.codex    { border-top: 3px solid var(--codex);    box-shadow: 0 24px 40px -16px rgba(0,0,0,0.6), 0 -8px 32px -10px rgba(52,211,153,0.35); }
+  .terminal.gemini   { border-top: 3px solid var(--gemini);   box-shadow: 0 24px 40px -16px rgba(0,0,0,0.6), 0 -8px 32px -10px rgba(167,139,250,0.35); }
+  .terminal.deepseek { border-top: 3px solid var(--deepseek); box-shadow: 0 24px 40px -16px rgba(0,0,0,0.6), 0 -8px 32px -10px rgba(59,130,246,0.40); }
+
+  .titlebar {
+    display: flex; align-items: center; justify-content: space-between;
+    height: 36px;
+    background: var(--bg-2);
+    border-bottom: 1px solid var(--line);
+    padding: 0 14px;
+  }
+  .lights { display: flex; gap: 7px; }
+  .lights span { width: 11px; height: 11px; border-radius: 50%; display: inline-block; }
+  .lights .r { background: #ff5f57; }
+  .lights .y { background: #febc2e; }
+  .lights .g { background: #28c840; }
+  .title {
+    font-family: 'JetBrains Mono', 'DejaVu Sans Mono', monospace;
+    font-size: 13px;
+    color: var(--ink-dim);
+  }
+  .title strong { color: var(--ink); margin-right: 6px; }
+
+  .body {
+    padding: 18px 20px;
+    font-family: 'JetBrains Mono', 'DejaVu Sans Mono', monospace;
+    font-size: 14px;
+    line-height: 1.6;
+    color: var(--ink);
+    height: calc(100% - 36px);
+    overflow: hidden;
+  }
+  .body .p { color: var(--ink-dim); }
+  .body .cmd { color: var(--good); }
+  .body .out { color: var(--ink); }
+  .body .mute { color: var(--ink-dim); }
+  .body .claude-pop   { color: var(--claude); }
+  .body .codex-pop    { color: var(--codex); }
+  .body .gemini-pop   { color: var(--gemini); }
+  .body .deepseek-pop { color: var(--deepseek); }
+  .body .blink { color: var(--good); }
+
+  /* ── FLOW REGION — arrows reach the plate ───────────────────── */
+  .flow {
+    position: absolute;
+    left: 0; right: 0;
+    top: 490px;       /* just under the terminals (terminals end ~486) */
+    height: 200px;    /* reaches the plate's top (~y=690) */
+    pointer-events: none;
+    z-index: 1;
+  }
+  .flow svg { width: 100%; height: 100%; }
+
+  /* ── SHARED FOLDER PLATE ────────────────────────────────────── */
+  .plate {
+    position: absolute;
+    left: 50%; bottom: 50px;
+    transform: translateX(-50%);
+    display: flex; align-items: center; gap: 20px;
+    background: var(--bg-1);
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    padding: 22px 44px;
+    box-shadow: 0 0 0 1px rgba(255,255,255,0.02) inset, 0 16px 40px -16px rgba(0,0,0,0.6);
+    z-index: 2;
+  }
+  .plate .ico {
+    font-family: 'JetBrains Mono', 'DejaVu Sans Mono', monospace;
+    font-size: 28px;
+    color: var(--bus);
+  }
+  .plate .text {
+    font-family: 'JetBrains Mono', 'DejaVu Sans Mono', monospace;
+    font-size: 18px;
+    color: var(--ink);
+    white-space: nowrap;
+  }
+  .plate .text strong { color: var(--ink-bright); }
+  .plate .sep { width: 1px; height: 30px; background: var(--line); }
+  .plate .pill {
+    display: inline-flex; align-items: center; gap: 7px;
+    flex: 0 0 auto;
+    white-space: nowrap;
+    font-family: 'JetBrains Mono', 'DejaVu Sans Mono', monospace;
+    font-size: 15px;
+    color: var(--good);
+    background: rgba(126,231,135,0.08);
+    border: 1px solid rgba(126,231,135,0.25);
+    padding: 7px 14px;
+    border-radius: 999px;
+  }
+  .plate .pill.amber {
+    color: var(--bus);
+    background: rgba(251,191,36,0.08);
+    border-color: rgba(251,191,36,0.25);
+  }
+</style>
+</head>
+<body>
+  <div class="canvas">
+
+    <!-- HEADER -->
+    <div class="header">
+      <div class="brand">
+        <span class="logo-mark">[≡]</span>
+        <span class="logo-word">buses</span>
+      </div>
+      <div class="tagline">
+        <div class="tagline-1">Any AI window talking to any other.</div>
+        <div class="tagline-2">claude ↔ codex ↔ gemini ↔ local LLMs · zero idle tokens · tamper-proof</div>
+      </div>
+    </div>
+
+    <!-- TERMINALS (4 cards) -->
+    <div class="terminals">
+
+      <!-- Claude -->
+      <div class="terminal claude">
+        <div class="titlebar">
+          <div class="lights"><span class="r"></span><span class="y"></span><span class="g"></span></div>
+          <div class="title"><strong>claude</strong>—  alice@laptop</div>
+          <div style="width:36px"></div>
+        </div>
+        <div class="body">
+          <div><span class="p">alice@laptop $</span> <span class="cmd">/buses:send all bob</span></div>
+          <div><span class="cmd">  "deploy logs ok?"</span></div>
+          <div><span class="out">sent: general/20260518T…__a3f1.msg</span></div>
+          <div style="margin-top: 14px"><span class="p">alice@laptop $</span> <span class="blink">▍</span></div>
+          <div style="margin-top: 22px"><span class="claude-pop">📬 buses: 1 new from <strong>bob</strong></span></div>
+          <div><span class="mute">  &gt; all clean. shipping at 17:00.</span></div>
+        </div>
+      </div>
+
+      <!-- Codex -->
+      <div class="terminal codex">
+        <div class="titlebar">
+          <div class="lights"><span class="r"></span><span class="y"></span><span class="g"></span></div>
+          <div class="title"><strong>codex</strong>—  bob@server</div>
+          <div style="width:36px"></div>
+        </div>
+        <div class="body">
+          <div><span class="codex-pop">📬 buses: 1 new from <strong>alice</strong></span></div>
+          <div><span class="mute">  &gt; deploy logs ok?</span></div>
+          <div style="margin-top: 8px"><span class="p">bob@server $</span> <span class="cmd">tail -n 20 /var/log/deploy.log</span></div>
+          <div><span class="out">  ✓ migration 0042 ok (1.2s)</span></div>
+          <div><span class="out">  ✓ health probes green</span></div>
+          <div><span class="out">  ✓ traffic shifted: 100%</span></div>
+          <div style="margin-top: 8px"><span class="p">bob@server $</span> <span class="cmd">/buses:send alice "all clean"</span></div>
+        </div>
+      </div>
+
+      <!-- Gemini -->
+      <div class="terminal gemini">
+        <div class="titlebar">
+          <div class="lights"><span class="r"></span><span class="y"></span><span class="g"></span></div>
+          <div class="title"><strong>gemini</strong>—  felix@phone</div>
+          <div style="width:36px"></div>
+        </div>
+        <div class="body">
+          <div><span class="gemini-pop">📬 buses: 2 new from <strong>alice, bob</strong></span></div>
+          <div><span class="mute">  &gt; deploy logs ok? / all clean.</span></div>
+          <div style="margin-top: 12px"><span class="p">felix@phone $</span> <span class="cmd">buses-wrap gemini</span></div>
+          <div><span class="out">  &gt; (inbox auto-prepended)</span></div>
+          <div><span class="out">  &gt; updating the release notes</span></div>
+          <div><span class="out">    draft to mention v0.7.1.</span></div>
+          <div style="margin-top: 8px"><span class="p">felix@phone $</span> <span class="blink">▍</span></div>
+        </div>
+      </div>
+
+      <!-- DeepSeek (local LLM) -->
+      <div class="terminal deepseek">
+        <div class="titlebar">
+          <div class="lights"><span class="r"></span><span class="y"></span><span class="g"></span></div>
+          <div class="title"><strong>deepseek</strong>—  ops@nas</div>
+          <div style="width:36px"></div>
+        </div>
+        <div class="body">
+          <div><span class="deepseek-pop">📬 buses: 3 new from <strong>alice, bob, felix</strong></span></div>
+          <div><span class="mute">  &gt; deploy / all clean / notes ok.</span></div>
+          <div style="margin-top: 12px"><span class="p">ops@nas $</span> <span class="cmd">buses-wrap ollama run deepseek</span></div>
+          <div><span class="out">  &gt; latency -8% · errors 0</span></div>
+          <div><span class="out">  &gt; /buses:send team "approved ✓"</span></div>
+          <div style="margin-top: 8px"><span class="p">ops@nas $</span> <span class="blink">▍</span></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- FLOW: four curved arrows converging at the plate -->
+    <div class="flow">
+      <svg viewBox="0 0 1600 200" preserveAspectRatio="none">
+        <defs>
+          <marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+            <path d="M 0 0 L 10 5 L 0 10 z" fill="#fbbf24" opacity="0.7"/>
+          </marker>
+          <linearGradient id="lineGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+            <stop offset="0%"   stop-color="#fbbf24" stop-opacity="0.05"/>
+            <stop offset="100%" stop-color="#fbbf24" stop-opacity="0.55"/>
+          </linearGradient>
+        </defs>
+        <!--
+          4 cards centered at canvas x: 232, 622, 1012, 1402 (computed for
+          4 × 360-wide cards with 24px gaps and equal margins on a 1600 canvas).
+          All converge to (800, 195) — just above the plate at canvas y≈690.
+        -->
+        <path d="M 232  0  Q 232  100, 800 195" stroke="url(#lineGrad)" stroke-width="2" fill="none" marker-end="url(#ah)"/>
+        <path d="M 622  0  Q 622  100, 800 195" stroke="url(#lineGrad)" stroke-width="2" fill="none" marker-end="url(#ah)"/>
+        <path d="M 1012 0  Q 1012 100, 800 195" stroke="url(#lineGrad)" stroke-width="2" fill="none" marker-end="url(#ah)"/>
+        <path d="M 1402 0  Q 1402 100, 800 195" stroke="url(#lineGrad)" stroke-width="2" fill="none" marker-end="url(#ah)"/>
+      </svg>
+    </div>
+
+    <!-- SHARED FOLDER PLATE -->
+    <div class="plate">
+      <span class="ico">[ ]</span>
+      <span class="text"><strong>shared folder</strong>  <span style="color:var(--ink-dim)">— NFS · Syncthing · Dropbox · single disk</span></span>
+      <span class="sep"></span>
+      <span class="pill">🔒 tamper-proof</span>
+      <span class="pill amber">0 idle tokens</span>
+    </div>
+
+  </div>
+</body>
+</html>

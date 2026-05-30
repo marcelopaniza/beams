@@ -1,0 +1,20 @@
+{
+  "_comment": [
+    "This is an EXAMPLE — copy to .mcp.json (project-level) or merge the",
+    "'buses' entry into ~/.claude.json (user-level).  For user-level config",
+    "replace './channel/buses-channel.mjs' with the absolute path to that",
+    "file, e.g. '/home/you/projects/buses/channel/buses-channel.mjs'.",
+    "",
+    "After registering, launch with the development flag (required for any",
+    "community plugin not yet on Anthropic's channel allowlist):",
+    "  claude --dangerously-load-development-channels server:buses",
+    "",
+    "See channel/README.md for the full setup and watcher wiring steps."
+  ],
+  "mcpServers": {
+    "buses": {
+      "command": "node",
+      "args": ["./channel/buses-channel.mjs"]
+    }
+  }
+}

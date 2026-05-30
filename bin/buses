@@ -1,0 +1,113 @@
+#!/usr/bin/env bash
+# buses: CLI-agnostic entry point.
+#
+# The /buses:* slash commands are Claude Code-specific, but every bus
+# operation underneath is a plain bash script in lib/. This wrapper exposes
+# those scripts as `buses <subcommand> [args...]` so Codex CLI, Gemini CLI,
+# local-LLM orchestrators, scripts, and plain shells can ride a bus
+# alongside Claude Code terminals without learning the lib/ layout.
+#
+# See README §"Cross-CLI ridership" for identity setup and the --inject mode
+# for pre-turn delivery in non-Claude CLIs.
+
+set -euo pipefail
+
+# Resolve symlinks portably (GNU `readlink -f` isn't on macOS bash 3.2). This
+# lets users symlink bin/buses onto $PATH (the README recommends it) without
+# the lib/ lookup pointing at the symlink's directory instead of the repo.
+src="${BASH_SOURCE[0]}"
+while [ -L "$src" ]; do
+  src_dir="$(cd "$(dirname "$src")" && pwd)"
+  src="$(readlink "$src")"
+  case "$src" in /*) ;; *) src="$src_dir/$src" ;; esac
+done
+here="$(cd "$(dirname "$src")" && pwd)"
+lib="$here/../lib"
+[ -d "$lib" ] || { printf 'buses: cannot find lib/ relative to %s\n' "$here" >&2; exit 1; }
+
+sub="${1:-}"; shift || true
+
+usage() {
+  cat <<'EOF'
+buses: cross-terminal messaging via a shared folder.
+
+usage: buses <subcommand> [args...]
+
+core:
+  init <shared-path>             initialise this terminal/session
+  name <new-name>                set this session's friendly name
+  create <bus>                   create a new bus on the shared folder
+  join <bus>                     subscribe to a bus (auto-creates if missing)
+  leave <bus>                    unsubscribe and remove your presence
+  send <bus> <to> <body...>      send a message; <to> = name | uuid | all | comma-list
+  read [--peek|--count|--inject] read unread messages addressed to you
+                                 (default: human-readable; --inject = LLM-friendly block)
+  status                         this session's config + subscriptions + unread counts
+  list                           every bus on the shared folder
+  members <bus>                  list members (alias: riders)
+
+driver-only:
+  lock <bus> [reason]            block all sends except from the driver
+  unlock <bus>                   lift the lock
+  kick <bus> <name-or-uuid> [reason]      ban + remove member + drop notice
+  unkick <bus> <name-or-uuid>             lift a ban
+  transfer-driver <bus> <to> [--force]    hand the wheel
+  require-signatures <bus> on|off         tighten/relax signature policy
+  gc <bus|all> [--dry-run] [N]            delete messages older than N (default 90d)
+  cleanup-stale <bus> [--dry-run] [N]     drop stale member records (default 30d)
+
+watcher (desktop pings):
+  watch start [interval]         detached polling daemon (default 5s)
+  watch stop                     kill the daemon
+  watch status                   running state, PID, log tail
+  watch logs [n]                 tail the watcher log
+
+environment:
+  BUSES_CONFIG_DIR   override the per-terminal config dir. Set this per
+                     terminal pane in non-Claude shells (e.g. one tmux pane
+                     per identity) so each rider has its own UUID. Claude
+                     Code sets this implicitly via CLAUDE_CODE_SESSION_ID;
+                     tmux/iTerm/Windows Terminal panes auto-derive a key
+                     when neither is present.
+
+See README §"Cross-CLI ridership" for the full story.
+EOF
+}
+
+case "$sub" in
+  ''|-h|--help|help)
+    usage
+    exit 0
+    ;;
+  init|create|join|leave|send|status|list|name|lock|unlock|kick|unkick|gc|cleanup-stale|transfer-driver|require-signatures|watch)
+    exec bash "$lib/${sub}.sh" "$@"
+    ;;
+  members|riders)
+    exec bash "$lib/members.sh" "$@"
+    ;;
+  read)
+    # default = --human. Pass through user-facing mode flags only. --hook and
+    # --notify are reserved for the Claude Code plugin and the watcher
+    # daemon respectively; exposing them via the cross-CLI wrapper would
+    # leak Claude-internal JSON / TAB-separated watcher output into a
+    # foreign orchestrator's prompt. Refuse loudly instead of silently
+    # falling through.
+    flag="--human"
+    case "${1:-}" in
+      --hook|--notify)
+        printf 'buses: %s is reserved (Claude Code plugin / watcher daemon); not exposed via bin/buses\n' "$1" >&2
+        exit 2 ;;
+      --human|--peek|--count|--inject) flag="$1"; shift ;;
+    esac
+    exec bash "$lib/check.sh" "$flag" "$@"
+    ;;
+  *)
+    # Sanitise + truncate before echoing — $sub could contain ANSI escapes,
+    # a huge blob from a typo'd $VAR, or a leaked secret. Don't paint it onto
+    # the user's terminal verbatim.
+    safe_sub=$(printf '%s' "$sub" | LC_ALL=C tr -c 'A-Za-z0-9._-' '?' | cut -c1-40)
+    printf 'buses: unknown subcommand: %s\n' "$safe_sub" >&2
+    printf "       run 'buses help' for the list\n" >&2
+    exit 2
+    ;;
+esac

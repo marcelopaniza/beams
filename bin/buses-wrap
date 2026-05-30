@@ -1,0 +1,99 @@
+#!/usr/bin/env bash
+# buses-wrap: run a child process with the bus inbox pre-delivered.
+#
+# Claude Code receives bus messages automatically via the UserPromptSubmit
+# hook — the model sees them in context on the next prompt and is told to
+# mention them. Other CLIs (Codex, Gemini, local-LLM orchestrators) have no
+# such hook, so the messages would never actually reach the model.
+#
+# This wrapper closes that gap. It runs `buses read --inject` once to get
+# the wrapper-friendly nonced inbox block, then delivers it to the wrapped
+# command in whichever way the invocation makes possible:
+#
+#   Mode A (argv placeholder)
+#       buses-wrap ollama run llama3 --system '{BUSES_INBOX}
+#                                              you are a helpful assistant'
+#       → every literal {BUSES_INBOX} in argv is replaced with the inbox.
+#       Cleanest for tools that take a system prompt as a flag.
+#
+#   Mode B (stdin pipe)
+#       echo "deploy logs ok?" | buses-wrap ollama run llama3
+#       → when stdin is a pipe (not a TTY), the inbox is prepended to the
+#       child's stdin. Works for any tool that reads its prompt from stdin.
+#
+#   Mode C (TTY fallback — best effort)
+#       buses-wrap codex                  # interactive, no stdin pipe
+#       → the inbox is printed to stderr as a heads-up before exec'ing the
+#       child. The wrapped tool sees no special input; the human sees the
+#       inbox in their terminal. Use Mode A or B when you can.
+#
+# In all three modes, when there are no new messages this script is silent
+# (buses read --inject exits 0 with empty output → zero overhead).
+
+set -euo pipefail
+
+# Resolve symlinks portably (matches bin/buses; macOS bash 3.2 has no GNU
+# `readlink -f`). Required so symlinking onto $PATH still finds the sibling
+# `buses` script.
+src="${BASH_SOURCE[0]}"
+while [ -L "$src" ]; do
+  src_dir="$(cd "$(dirname "$src")" && pwd)"
+  src="$(readlink "$src")"
+  case "$src" in /*) ;; *) src="$src_dir/$src" ;; esac
+done
+here="$(cd "$(dirname "$src")" && pwd)"
+buses_cli="$here/buses"
+[ -x "$buses_cli" ] || { printf 'buses-wrap: cannot find sibling `buses` at %s\n' "$buses_cli" >&2; exit 1; }
+
+if [ "$#" -eq 0 ]; then
+  cat <<'EOF' >&2
+usage: buses-wrap <command> [args...]
+
+Delivers the buses inbox to a wrapped non-Claude AI CLI. See the top of
+this script for the three modes (argv placeholder / stdin pipe / TTY).
+EOF
+  exit 2
+fi
+
+# Capture the inbox once. Empty when no new messages, no config, or the
+# read fails for any reason — never abort the wrapped command on a buses
+# error, since the user's primary intent is to run the wrapped tool.
+inbox=$("$buses_cli" read --inject 2>/dev/null || true)
+
+if [ -z "$inbox" ]; then
+  exec "$@"
+fi
+
+# Mode A: if any argv contains the literal placeholder {BUSES_INBOX}, do
+# the substitution in-place and exec. Highest precedence — caller asked
+# for a specific delivery point.
+saw_placeholder=0
+new_args=()
+for a in "$@"; do
+  case "$a" in
+    *'{BUSES_INBOX}'*)
+      saw_placeholder=1
+      new_args+=("${a//\{BUSES_INBOX\}/$inbox}")
+      ;;
+    *)
+      new_args+=("$a")
+      ;;
+  esac
+done
+if [ "$saw_placeholder" -eq 1 ]; then
+  exec "${new_args[@]}"
+fi
+
+# Mode B: stdin is a pipe / file / heredoc (not a TTY). Prepend the inbox
+# block (plus a blank line) ahead of whatever the caller is piping in.
+# `< <(...)` is bash-only but bin/buses already requires bash.
+if [ ! -t 0 ]; then
+  exec "$@" < <(printf '%s\n\n' "$inbox"; cat)
+fi
+
+# Mode C: interactive TTY. We can't reliably feed the inbox into a tool we
+# don't know the system-prompt flag of, so the best we can do is print it
+# to stderr first — the human sees their inbox before the wrapped tool
+# takes over the screen. Use Mode A or B when you can.
+printf '%s\n' "$inbox" >&2
+exec "$@"

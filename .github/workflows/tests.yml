@@ -1,0 +1,47 @@
+name: tests
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  # Cancel in-progress runs for non-main refs (PRs, feature branches).
+  # NEVER cancel main — a force-pusher to a long-lived feature branch could
+  # otherwise repeatedly cancel main's CI and soft-DoS the green-build gate.
+  group: tests-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+jobs:
+  smoke:
+    name: smoke tests (rounds 1..9)
+    # Pin the runner so a base-image flip doesn't change our test env from
+    # under us. Bump intentionally when a new LTS lands.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    steps:
+      # Pin actions/checkout to a full SHA, not the v4 tag, so a tag-retarget
+      # supply-chain attack (e.g. the tj-actions/changed-files incident,
+      # March 2025) can't replace the action with malicious code that runs
+      # with the workflow's GITHUB_TOKEN. Bump intentionally via dependabot.
+      - uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4.1.1
+
+      - name: Verify runtime deps
+        # ubuntu-latest already ships bash 5, jq, openssl 3, GNU
+        # find/awk/sed — but verify so a future base-image change
+        # surfaces as a hard fail here rather than confusing test output.
+        run: |
+          set -euo pipefail
+          for cmd in bash jq openssl find awk sed; do
+            command -v "$cmd" >/dev/null 2>&1 \
+              || { echo "::error::missing required command: $cmd"; exit 1; }
+          done
+          bash --version | head -n 1
+          openssl version
+          jq --version
+
+      - name: Run smoke tests
+        run: bash tests/run-all.sh
