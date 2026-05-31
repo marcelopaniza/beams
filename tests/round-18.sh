@@ -103,5 +103,19 @@ printf '%s' "$bout" | grep -q 'not yet bound' || fail "boot hook didn't emit a b
 printf '%s' "$bout" | grep -q 'loop'          || fail "boot prompt didn't list known names: $bout"
 pass "SessionStart prompts an unbound session to /beams:name"
 
+banner "11. Stop hook delivers to a bound, opted-in session (proactive, no new prompt)"
+run sess-3 join general >/dev/null                       # sess-3 is bound to 'loop'
+tmp=$(mktemp); jq '.react.on_stop = true' "$IDENT/loop/config.json" > "$tmp" && mv "$tmp" "$IDENT/loop/config.json"
+run sender-x init "$SHARED" >/dev/null
+run sender-x name sender    >/dev/null
+run sender-x join general   >/dev/null
+run sender-x send general loop 'ping-without-typing' >/dev/null
+stopout=$( printf '{"stop_hook_active":false}' | ( unset BEAMS_CONFIG_DIR; \
+  export CLAUDE_CODE_SESSION_ID=sess-3 CLAUDE_PLUGIN_ROOT="$PLUGIN"; \
+  bash "$PLUGIN/hooks/respond-on-stop.sh" ) )
+printf '%s' "$stopout" | grep -q '"decision"'        || fail "Stop hook didn't emit a block decision: $stopout"
+printf '%s' "$stopout" | grep -q 'ping-without-typing' || fail "Stop hook didn't surface the waiting message: $stopout"
+pass "Stop hook surfaces a waiting message to a bound opted-in session"
+
 green ""
-green "round-18 PASS: durable identity + bind/rebind/migrate + lease + status + boot prompt"
+green "round-18 PASS: durable identity + bind/rebind/migrate + lease + status + boot prompt + Stop delivery"

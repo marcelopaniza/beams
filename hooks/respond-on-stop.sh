@@ -28,23 +28,19 @@ input=$(cat 2>/dev/null || true)
   active=$(printf '%s' "$input" | jq -r '.stop_hook_active // false' 2>/dev/null || echo false)
   [ "$active" = "true" ] && exit 0
 
-  # Cheap opt-in gate WITHOUT sourcing common.sh or running check.sh, so a
-  # session that didn't opt in pays almost nothing per turn. A Stop hook only
-  # ever fires inside Claude Code, so the config is at exactly one of:
-  #   $BEAMS_CONFIG_DIR (explicit override), or
-  #   <xdg>/beams/sessions/$CLAUDE_CODE_SESSION_ID  (the per-terminal default).
-  # The non-Claude terminals/projects fallbacks in common.sh can't apply here,
-  # so this inline resolution is complete for the hook's runtime context.
-  cfgdir="${BEAMS_CONFIG_DIR:-}"
-  if [ -z "$cfgdir" ] && [ -n "${CLAUDE_CODE_SESSION_ID:-}" ]; then
-    cfgdir="${XDG_CONFIG_HOME:-$HOME/.config}/beams/sessions/$CLAUDE_CODE_SESSION_ID"
-  fi
-  [ -n "$cfgdir" ] && [ -f "$cfgdir/config.json" ] || exit 0
-  [ "$(jq -r '.react.on_stop // false' "$cfgdir/config.json" 2>/dev/null)" = "true" ] || exit 0
+  # Resolve this session's identity the SAME way every other entry point does.
+  # That now follows a restart-safe name binding (sessions/<id>/bound →
+  # projects/<project>/identities/<name>); an inline shortcut would miss it and
+  # silently stop delivering to bound sessions. Sourcing common.sh costs a few
+  # ms per turn-end; the opt-in gate still short-circuits a non-opted-in session
+  # before any real work, and check.sh below reuses the same resolution.
+  source "$root/lib/common.sh" 2>/dev/null || exit 0
+  beams::config_exists || exit 0
+  [ "$(beams::react_flag on_stop)" = "true" ] || exit 0
 
-  # Opted in. Pin check.sh to the exact identity we just gated on, then render
-  # the Stop block (or nothing, when no message is actually waiting).
-  export BEAMS_CONFIG_DIR="$cfgdir"
+  # Opted in. Pin the resolved identity for the check.sh child, then render the
+  # Stop block (or nothing, when no message is actually waiting).
+  export BEAMS_CONFIG_DIR
   out=$("$root/lib/check.sh" --stop 2>/dev/null) || exit 0
   [ -n "$out" ] && printf '%s' "$out"
 } 2>/dev/null
