@@ -30,7 +30,28 @@ cat >/dev/null 2>&1 || true
   # SessionStart fires once per session, so we can afford the real thing.)
   # shellcheck source=../lib/common.sh
   source "$root/lib/common.sh" 2>/dev/null || exit 0
-  beams::config_exists || exit 0   # not a beams session → stay silent
+
+  if ! beams::config_exists; then
+    # Unbound session — typically a fresh session id after a Claude restart.
+    # If this project already has named beams identities, the user has used
+    # beams here before and just needs to re-bind, so surface a one-line prompt
+    # asking which session this is (instead of looking "not initialised"). No
+    # identities here → not a beams project → stay silent.
+    idnames=$(beams::list_identity_names 2>/dev/null) || idnames=""
+    [ -n "$idnames" ] || exit 0
+    listing=""
+    while IFS= read -r nm; do
+      [ -n "$nm" ] || continue
+      case "$(beams::lease_state "$(beams::identities_dir)/$nm" 2>/dev/null)" in
+        mine|busy:*) listing="${listing:+$listing, }${nm} (in use)" ;;
+        *)           listing="${listing:+$listing, }${nm}" ;;
+      esac
+    done <<< "$idnames"
+    prompt="This terminal is not yet bound to a beams identity for this project. Existing names here: ${listing}. Ask the user which session this is — an existing name to resume that identity, or a new name — then run /beams:name <name>. If it reports the name is in use because you just restarted, re-run with --force."
+    jq -n --arg ctx "$prompt" \
+      '{hookSpecificOutput: {hookEventName: "SessionStart", additionalContext: $ctx}}' 2>/dev/null || true
+    exit 0
+  fi
 
   # Pull unread FIRST — this advances the NOTIFY cursor too, so the notifier
   # daemon we may start next won't re-notify messages we just surfaced at boot.

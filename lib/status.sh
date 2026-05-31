@@ -28,6 +28,25 @@ printf '  shared_path:  %s  ' "$shared"
 [ -d "$shared" ] && printf '[ok]\n' || printf '[MISSING — mount the share]\n'
 printf '  session_id:   %s\n' "$sid"
 printf '  session_name: %s\n' "$name"
+
+# Durable binding + in-use lease — the name-keyed identity that survives a
+# Claude restart. Only meaningful when this terminal isn't pinned via an
+# explicit BEAMS_CONFIG_DIR override.
+if [ -n "$BEAMS_CONFIG_DIR_EXPLICIT" ]; then
+  printf '  bound:        (BEAMS_CONFIG_DIR override — not name-bound)\n'
+else
+  bound=$(beams::bound_name || true)
+  if [ -n "$bound" ]; then
+    printf '  bound:        %s\n' "$bound"
+    case "$(beams::lease_state "$BEAMS_CONFIG_DIR")" in
+      mine)   printf '  in use:       yes (this session)\n' ;;
+      busy:*) printf '  in use:       yes (another active session)\n' ;;
+      *)      printf '  in use:       no (lease free/stale)\n' ;;
+    esac
+  else
+    printf '  bound:        (unbound — run /beams:name <name> to bind this terminal)\n'
+  fi
+fi
 printf '  fingerprint:  %s\n' "$(beams::fingerprint || echo '(no key yet)')"
 printf '  created:      %s\n' "$created"
 printf '\n  subscriptions:\n'

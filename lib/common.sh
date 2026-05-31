@@ -45,6 +45,18 @@ beams::terminal_id() {
   printf '%s' "${CLAUDE_CODE_SESSION_ID:-}"
 }
 
+beams::_safe_key() {
+  # Sanitise a user string into ONE safe path component: rewrite anything
+  # outside the allowlist to '_', then reject the degenerate forms that could
+  # escape the directory (empty, '.', '..', dotfiles, leading dash, embedded
+  # '..'). Same hardening as the pane-key path below.
+  local k; k=$(printf '%s' "${1:-}" | LC_ALL=C tr -c 'A-Za-z0-9._-' '_')
+  case "$k" in
+    ''|.|..|.*|-*|*..*) printf ''; return 0 ;;
+  esac
+  printf '%s' "$k"
+}
+
 beams::_resolve_config_dir() {
   if [ -n "${BEAMS_CONFIG_DIR:-}" ]; then
     printf '%s' "$BEAMS_CONFIG_DIR"
@@ -52,7 +64,22 @@ beams::_resolve_config_dir() {
   fi
   local base="${XDG_CONFIG_HOME:-$HOME/.config}/beams"
   if [ -n "${CLAUDE_CODE_SESSION_ID:-}" ]; then
-    printf '%s/sessions/%s' "$base" "$CLAUDE_CODE_SESSION_ID"
+    # A session may be BOUND to a durable, name-keyed identity so its config
+    # survives a Claude restart that hands out a fresh session id. The pointer
+    # lives in the per-session dir and names the identity; resolution then
+    # redirects to projects/<project>/identities/<name>. An unbound session
+    # keeps using its ephemeral per-session dir (empty → "not initialised"
+    # until the SessionStart hook prompts for a name).
+    local sdir="$base/sessions/$CLAUDE_CODE_SESSION_ID"
+    if [ -f "$sdir/bound" ]; then
+      local bname; bname=$(beams::_safe_key "$(cat "$sdir/bound" 2>/dev/null)")
+      if [ -n "$bname" ]; then
+        printf '%s/projects/%s/identities/%s' \
+          "$base" "$(beams::_flatten_path "$(beams::project_dir)")" "$bname"
+        return 0
+      fi
+    fi
+    printf '%s' "$sdir"
     return 0
   fi
   # Non-Claude shells (Codex, Gemini, plain bash, local-LLM orchestrators):
@@ -92,6 +119,11 @@ BEAMS_CONFIG_DIR="$(beams::_resolve_config_dir)"
 BEAMS_CONFIG_FILE="$BEAMS_CONFIG_DIR/config.json"
 BEAMS_LEGACY_CONFIG_FILE="$HOME/.config/beams/config.json"
 BEAMS_IDENTITY_KEY="$BEAMS_CONFIG_DIR/identity.key"
+BEAMS_BASE_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/beams"
+# A durable identity is "in use" while the session holding it was seen within
+# this window; past it the lease is treated as released (the holder went away),
+# so a name frees up after an idle/closed session without manual cleanup.
+BEAMS_INUSE_STALE_SECONDS="${BEAMS_INUSE_STALE_SECONDS:-900}"
 
 # ── output ──────────────────────────────────────────────────────────────────
 beams::err() { printf 'beams: %s\n' "$*" >&2; }
@@ -169,6 +201,154 @@ beams::react_flag() {
   # active-session sustain); both default off so a plain session never spawns a
   # daemon or burns an extra turn without opting in.
   [ "$(beams::config_get ".react.$1")" = "true" ] && printf 'true' || printf ''
+}
+
+# ── named identities, session binding, and the in-use lease ─────────────────
+# A Claude Code session id is ephemeral: a fresh start gets a new one, which
+# would orphan the per-session config (the "not initialised after restart"
+# bug). So identity is anchored on a NAME the user picks — the same one
+# /beams:name sets — keyed per project at
+#   <base>/projects/<project>/identities/<name>/
+# A session BINDS to one via the pointer <base>/sessions/<id>/bound, which
+# resolution follows. A lease (lease.json) records which session currently
+# holds a name and when it was last seen, so two live sessions don't silently
+# share one identity.
+
+beams::_project_key() { beams::_flatten_path "$(beams::project_dir)"; }
+
+beams::identities_dir() {
+  printf '%s/projects/%s/identities' "$BEAMS_BASE_DIR" "$(beams::_project_key)"
+}
+
+beams::list_identity_names() {     # one name per line (only those with a config)
+  local d p; d=$(beams::identities_dir)
+  [ -d "$d" ] || return 0
+  for p in "$d"/*/; do
+    [ -f "${p}config.json" ] || continue
+    printf '%s\n' "$(basename "$p")"
+  done
+}
+
+beams::project_shared_path() {     # inherit the shared folder from any sibling identity
+  local d f; d=$(beams::identities_dir)
+  [ -d "$d" ] || return 0
+  for f in "$d"/*/config.json; do
+    [ -f "$f" ] || continue
+    jq -r '.shared_path // empty' "$f" 2>/dev/null
+    return 0
+  done
+}
+
+beams::bound_name() {              # echoes the name this session is bound to, if any
+  local sid pf; sid=$(beams::terminal_id); [ -n "$sid" ] || return 0
+  pf="$BEAMS_BASE_DIR/sessions/$sid/bound"
+  [ -f "$pf" ] && beams::_safe_key "$(cat "$pf" 2>/dev/null)"
+}
+
+beams::_now_epoch() { date -u +%s; }
+beams::lease_file() { printf '%s/lease.json' "${1:-$BEAMS_CONFIG_DIR}"; }
+
+beams::lease_claim() {             # current session takes the lease on $BEAMS_CONFIG_DIR
+  local lf tmp; lf=$(beams::lease_file); tmp="${lf}.tmp.$$"
+  mkdir -p "$(dirname "$lf")"
+  jq -n --arg s "$(beams::terminal_id)" --argjson t "$(beams::_now_epoch)" \
+    '{bound_session:$s, last_seen:$t}' > "$tmp" 2>/dev/null && mv "$tmp" "$lf" || rm -f "$tmp"
+}
+
+beams::lease_refresh() {           # bump last_seen iff this session holds the lease
+  local lf tmp holder; lf=$(beams::lease_file); [ -f "$lf" ] || return 0
+  holder=$(jq -r '.bound_session // ""' "$lf" 2>/dev/null)
+  [ "$holder" = "$(beams::terminal_id)" ] || return 0
+  tmp="${lf}.tmp.$$"
+  jq --argjson t "$(beams::_now_epoch)" '.last_seen = $t' "$lf" > "$tmp" 2>/dev/null \
+    && mv "$tmp" "$lf" || rm -f "$tmp"
+}
+
+beams::lease_state() {             # $1 = identity dir; echoes: free | mine | busy:<age-secs>
+  local lf holder seen age; lf=$(beams::lease_file "${1:-$BEAMS_CONFIG_DIR}")
+  [ -f "$lf" ] || { printf 'free'; return 0; }
+  holder=$(jq -r '.bound_session // ""' "$lf" 2>/dev/null)
+  [ -n "$holder" ] || { printf 'free'; return 0; }
+  [ "$holder" = "$(beams::terminal_id)" ] && { printf 'mine'; return 0; }
+  seen=$(jq -r '.last_seen // 0' "$lf" 2>/dev/null)
+  age=$(( $(beams::_now_epoch) - seen ))
+  [ "$age" -lt "$BEAMS_INUSE_STALE_SECONDS" ] && printf 'busy:%s' "$age" || printf 'free'
+}
+
+beams::bind_session() {
+  # Bind THIS session to the durable identity <name> in this project: rebind to
+  # an existing one (restoring its UUID + subscriptions), migrate a not-yet-bound
+  # scratch config into one, or create a fresh one (inheriting the project's
+  # shared folder). Pass --force to take over a name another live session still
+  # holds. Reassigns the module config globals to the identity so every helper
+  # below operates on it.
+  local force="" name=""
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      --force) force=1; shift ;;
+      *) [ -z "$name" ] && name="$1"; shift ;;
+    esac
+  done
+  [ -n "$name" ] || beams::die "usage: name.sh <friendly-name> [--force]"
+  beams::valid_name "$name" || beams::die "invalid name: $name (allowed: A-Z a-z 0-9 . _ -, length 1-64)"
+  local key; key=$(beams::_safe_key "$name")
+  [ -n "$key" ] || beams::die "name '$name' is not usable as an identity key"
+  local sid; sid=$(beams::terminal_id)
+  [ -n "$sid" ] || beams::die "binding needs a Claude Code session id; outside Claude Code, set BEAMS_CONFIG_DIR instead"
+
+  local sdir="$BEAMS_BASE_DIR/sessions/$sid"
+  local scratch="$sdir/config.json"
+  local idir; idir="$(beams::identities_dir)/$key"
+  local action
+
+  if [ -f "$idir/config.json" ]; then
+    # Existing identity → lease gate, then rebind (config/UUID kept as-is).
+    local state; state=$(beams::lease_state "$idir")
+    case "$state" in
+      busy:*)
+        [ -n "$force" ] || beams::die "name '$name' is in use by another active session (last seen ${state#busy:}s ago).
+  re-run with --force to take it over (e.g. you just restarted), or pick another name."
+        ;;
+    esac
+    action="rebound to"
+  elif [ -f "$scratch" ]; then
+    # This session ran init but isn't bound yet → migrate the scratch config
+    # into the durable identity (preserves its UUID, key, and subscriptions).
+    mkdir -p "$idir"
+    mv "$scratch" "$idir/config.json"
+    [ -f "$sdir/identity.key" ] && mv "$sdir/identity.key" "$idir/identity.key"
+    action="created"
+  else
+    # Brand-new identity → inherit the project's shared folder from a sibling.
+    local shared; shared=$(beams::project_shared_path)
+    [ -n "$shared" ] || beams::die "no beams identity in this project yet — run /beams:start to choose the shared folder first"
+    mkdir -p "$idir"
+    BEAMS_CONFIG_DIR="$idir"; BEAMS_CONFIG_FILE="$idir/config.json"; BEAMS_IDENTITY_KEY="$idir/identity.key"
+    beams::config_init_file "$shared" >/dev/null
+    beams::ensure_identity_key
+    action="created"
+  fi
+
+  # Operate as the identity from here on.
+  BEAMS_CONFIG_DIR="$idir"; BEAMS_CONFIG_FILE="$idir/config.json"; BEAMS_IDENTITY_KEY="$idir/identity.key"
+  beams::config_set '.session_name = $v' --arg v "$name"
+  beams::lease_claim
+  mkdir -p "$sdir"; printf '%s' "$key" > "$sdir/bound"
+
+  # Re-publish presence so peers see this session live on its subscriptions.
+  local beam
+  while IFS= read -r beam; do
+    [ -n "$beam" ] || continue
+    beams::beam_exists "$beam" && beams::write_member_record "$beam"
+  done < <(jq -r '.beams[]?' "$BEAMS_CONFIG_FILE")
+
+  # Best-effort window title — works in a real terminal, silently skips when
+  # there's no controlling TTY (e.g. the VS Code Claude Code integration). The
+  # group redirects stderr FIRST so a failed open of /dev/tty (ENXIO when there
+  # is no controlling terminal) can't leak onto the user's output.
+  { printf '\033]2;beams:%s\007' "$name" >/dev/tty; } 2>/dev/null || true
+
+  printf 'beams: %s "%s"%s\n' "$action" "$name" "$([ -n "$force" ] && printf ' (forced takeover)')"
 }
 
 beams::config_init_file() {

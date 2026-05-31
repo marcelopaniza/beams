@@ -105,7 +105,7 @@ Install on each machine and point them all at the same shared folder.
 | Command | What it does |
 |---|---|
 | `/beams:start` | Guided first-time setup. Asks the right questions, runs the right commands. **Start here.** |
-| `/beams:name <name>` | Name this terminal so others can address it. |
+| `/beams:name <name>` | Name this terminal — and bind it to a durable identity that survives a Claude restart (see [Surviving a restart](#surviving-a-claude-restart)). |
 | `/beams:join <beam>` | Subscribe to a channel (creates it if it doesn't exist; you become its driver). |
 | `/beams:send <beam> <to> <msg>` | Send to a name, `all`, or a comma-list. `@-mention` someone in the message to tag them. |
 | `/beams:read` | Manually check for new messages. (You rarely need this — it happens on its own.) |
@@ -114,6 +114,12 @@ Install on each machine and point them all at the same shared folder.
 | `/beams:watch start` | Desktop pings for new messages — a background daemon, zero tokens. |
 
 Everything else — rosters (`members`), leaving, creating a channel without joining, the driver controls, signatures, and maintenance — is grouped under one dispatcher, **`/beams:admin <subcommand>`** (run it with no arguments to list them). Full reference → **[docs/COMMANDS.md](docs/COMMANDS.md)**.
+
+## Surviving a Claude restart
+
+A fresh Claude session gets a new session id, so beams anchors your identity on the **name** you pick — keyed per project, not per session. `/beams:name loop` binds this terminal to a durable `loop` identity (same UUID, same subscriptions, kept under `~/.config/beams/projects/<project>/identities/`). After a restart beams greets the new session and asks which one it is; answer `loop` — or run `/beams:name loop` — and it resumes that identity instead of starting over.
+
+`/beams:status` shows the binding and an **in use** flag. A name a *different* live session still holds is protected: re-bind with `/beams:name loop --force` to take it over (e.g. right after a restart, when the old session is gone but its lease hasn't expired yet).
 
 ## Profiles
 

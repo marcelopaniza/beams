@@ -34,6 +34,7 @@ beams/
 │   ├── lock.sh   unlock.sh   kick.sh    unkick.sh
 │   ├── transfer-driver.sh  cleanup-stale.sh  gc.sh
 │   ├── require-signatures.sh
+│   ├── admin.sh                      #   /beams:admin dispatcher (driver/maintenance verbs)
 │   ├── watch.sh                       #   /beams:watch dispatcher
 │   └── watcher_daemon.sh              #   detached polling daemon
 ├── channel/                           # opt-in real-time MCP "doorbell" (experimental)
@@ -43,8 +44,8 @@ beams/
 │   └── smoke.sh                       #   self-contained handshake/POST smoke
 ├── presets/                           # /beams:admin init --profile <name> overlays
 │   └── hermes.json   responder.json
-├── tests/                             # smoke tests, 17 rounds
-│   ├── round-{1..17}.sh
+├── tests/                             # smoke tests, 18 rounds
+│   ├── round-{1..18}.sh
 │   └── run-all.sh
 ├── assets/                            # README marketing images + sources
 │   ├── beams-hero.jpg        beams-any-ai.jpg        # used in the README
@@ -57,6 +58,25 @@ beams/
 │   └── INTERNALS.md
 └── README.md
 ```
+
+## Session identity (restart-safe)
+
+A Claude Code session id (`$CLAUDE_CODE_SESSION_ID`) is **ephemeral** — a fresh start mints a new one, which would orphan a per-session config. So identity is anchored on a user-chosen **name**, keyed per project:
+
+```
+~/.config/beams/
+├── sessions/<session-id>/
+│   ├── bound                      # tiny pointer: the name this session is bound to
+│   └── config.json                # only while UNBOUND — a "scratch" init before naming
+└── projects/<flattened-project-dir>/identities/<name>/
+    ├── config.json                # the durable identity (UUID, name, subscriptions)
+    ├── identity.key               # its Ed25519 private key
+    └── lease.json                 # { bound_session, last_seen } — the in-use lease
+```
+
+- **Resolution** (`beams::_resolve_config_dir`): explicit `$BEAMS_CONFIG_DIR` wins; otherwise, if `sessions/<id>/bound` exists, resolve to that named identity; else the ephemeral `sessions/<id>/` (empty → "not initialised" until the SessionStart hook prompts for a name).
+- **Binding** (`/beams:name <name>`): rebinds to an existing identity (restoring its UUID + subscriptions), migrates a scratch config into one, or creates a fresh one (inheriting the project's shared folder). A new session id after a restart re-binds to the same name and is the same rider.
+- **In-use lease**: `lease.json` records which session holds a name and when it was last seen (refreshed each prompt by `check.sh`). Within `BEAMS_INUSE_STALE_SECONDS` (default 900) a name held by *another* session blocks a bind unless `--force`; past that the lease is treated as released. `/beams:status` surfaces it as **in use: yes/no**.
 
 ## Message format
 

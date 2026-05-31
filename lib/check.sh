@@ -28,6 +28,11 @@ source "$(cd "$(dirname "$0")" && pwd)/common.sh"
 beams::require jq find
 beams::config_require
 
+# Heartbeat: a check on this identity means the session is active now, so keep
+# its in-use lease fresh (no-op unless this session holds one). Never let a
+# lease write break message delivery.
+beams::lease_refresh 2>/dev/null || true
+
 mode="${1:---human}"
 case "$mode" in --hook|--human|--inject|--peek|--count|--notify|--stop) ;; *) beams::die "unknown mode: $mode" ;; esac
 

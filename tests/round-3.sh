@@ -7,6 +7,7 @@ TMPDIR=$(mktemp -d /tmp/beams-test3.XXXXXX)
 SHARED="$TMPDIR/share"
 HOME_REAL="$HOME"
 FAKE_HOME="$TMPDIR/home"
+PROJ="$TMPDIR/proj"
 
 red()    { printf '\033[31m%s\033[0m\n' "$*"; }
 green()  { printf '\033[32m%s\033[0m\n' "$*"; }
@@ -17,7 +18,7 @@ pass()   { green "PASS: $*"; }
 cleanup() { rm -rf "$TMPDIR"; }
 trap cleanup EXIT
 
-mkdir -p "$SHARED" "$FAKE_HOME/.config"
+mkdir -p "$SHARED" "$FAKE_HOME/.config" "$PROJ"
 
 # Run a script with a synthetic Claude Code env. No BEAMS_CONFIG_DIR override —
 # we want to test the auto-resolution.
@@ -27,6 +28,7 @@ run_as_term() {
     export CLAUDE_CODE_SESSION_ID="$term_id"
     export HOME="$FAKE_HOME"
     export XDG_CONFIG_HOME="$FAKE_HOME/.config"
+    export CLAUDE_PROJECT_DIR="$PROJ"
     "$PLUGIN/lib/$1.sh" "${@:2}" )
 }
 
@@ -43,22 +45,34 @@ sid_b=$(jq -r '.session_id' "$cfg_b")
 [ "$sid_a" != "$sid_b" ] || fail "two terminals should mint distinct UUIDs; both got $sid_a"
 pass "terminal A sid=$sid_a, terminal B sid=$sid_b (distinct)"
 
-banner "2. /beams:name in A does NOT rename B (the original bug)"
+banner "2. /beams:name binds each terminal to its own durable identity; naming A does NOT touch B"
 run_as_term aaaaaaaa-1111-1111-1111-aaaaaaaaaaaa name terminal-A >/dev/null
 run_as_term bbbbbbbb-2222-2222-2222-bbbbbbbbbbbb name terminal-B >/dev/null
 
-name_a=$(jq -r '.session_name' "$cfg_a")
-name_b=$(jq -r '.session_name' "$cfg_b")
+# Naming migrates each scratch config into a durable, name-keyed identity that
+# survives a restart; the per-session dir keeps only a 'bound' pointer.
+pkey=$(printf '%s' "$PROJ" | sed 's,/,-,g')
+ident="$FAKE_HOME/.config/beams/projects/$pkey/identities"
+ida="$ident/terminal-A/config.json"
+idb="$ident/terminal-B/config.json"
+[ -f "$ida" ] && [ -f "$idb" ]         || fail "naming should create durable identities; got: $(ls -R "$ident" 2>&1)"
+[ ! -f "$cfg_a" ] && [ ! -f "$cfg_b" ] || fail "scratch configs should have migrated away"
+[ "$(cat "$FAKE_HOME/.config/beams/sessions/aaaaaaaa-1111-1111-1111-aaaaaaaaaaaa/bound")" = terminal-A ] || fail "A not bound to terminal-A"
+[ "$(cat "$FAKE_HOME/.config/beams/sessions/bbbbbbbb-2222-2222-2222-bbbbbbbbbbbb/bound")" = terminal-B ] || fail "B not bound to terminal-B"
+name_a=$(jq -r '.session_name' "$ida")
+name_b=$(jq -r '.session_name' "$idb")
 [ "$name_a" = "terminal-A" ] || fail "A's name should be terminal-A, got: $name_a"
 [ "$name_b" = "terminal-B" ] || fail "B's name should be terminal-B, got: $name_b"
-pass "names are independent (A=$name_a, B=$name_b)"
+[ "$(jq -r '.session_id' "$ida")" = "$sid_a" ] || fail "A's identity lost its original UUID"
+[ "$(jq -r '.session_id' "$idb")" = "$sid_b" ] || fail "B's identity lost its original UUID"
+pass "independent identities (A=$name_a, B=$name_b), UUIDs preserved, no cross-rename"
 
-banner "3. claude_code_session_id is recorded in config"
-cc_a=$(jq -r '.claude_code_session_id' "$cfg_a")
-cc_b=$(jq -r '.claude_code_session_id' "$cfg_b")
+banner "3. claude_code_session_id (the creator) is recorded in each identity config"
+cc_a=$(jq -r '.claude_code_session_id' "$ida")
+cc_b=$(jq -r '.claude_code_session_id' "$idb")
 [ "$cc_a" = "aaaaaaaa-1111-1111-1111-aaaaaaaaaaaa" ] || fail "A's recorded cc-sid wrong: $cc_a"
 [ "$cc_b" = "bbbbbbbb-2222-2222-2222-bbbbbbbbbbbb" ] || fail "B's recorded cc-sid wrong: $cc_b"
-pass "claude_code_session_id is captured in each config"
+pass "claude_code_session_id is captured in each identity config"
 
 banner "4. legacy single-config triggers hint"
 mkdir -p "$FAKE_HOME/.config/beams"
