@@ -4,7 +4,9 @@ All notable changes are documented here. Format follows [Keep a Changelog](https
 
 > **Lineage.** Beams is the proactive/reactive fork of [buses](https://github.com/marcelopaniza/buses) — a pure-bash cross-terminal messenger. Beams begins at **0.9.0** and inherits buses' version history below (entries at 0.8.1 and earlier were released as *buses*; the API and on-disk format are shared, the names are not — Beams uses its own `~/.config/beams` and `<shared>/beams/` namespace). The 0.9.0 entry is Beams' first release: the proactive-delivery layer that buses deliberately does not carry.
 
-## [Unreleased]
+## [0.10.0] — 2026-05-31
+
+Slimmer command surface and restart-safe identity. The 22-entry slash menu collapses to 8 everyday commands + `/beams:admin`, and a session's identity is now anchored on a **name** (keyed per project) so it survives a Claude restart — with an in-use lease guarding against two live sessions sharing one name.
 
 ### Changed
 
