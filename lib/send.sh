@@ -73,7 +73,7 @@ beams::beam_exists "$beam" || beams::die "beam '$beam' does not exist on the sha
 
 # Banlist gate: refuse if our session has been kicked from this beam.
 if beams::is_banned "$beam"; then
-  beams::die "you have been kicked from beam '$beam' — ask the driver to /beams:unkick you"
+  beams::die "you have been kicked from beam '$beam' — ask the driver to /beams:admin unkick you"
 fi
 
 # Lock gate: refuse if locked, unless we are the driver.

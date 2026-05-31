@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# /beams:members <beam> — list members of a beam, marking the driver and any
+# /beams:admin members <beam> — list members of a beam, marking the driver and any
 # banned UUIDs. Also prints a header line if the beam is locked.
 
 set -euo pipefail

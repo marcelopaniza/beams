@@ -13,8 +13,9 @@
 # Fix: route $ARGUMENTS through a quoted-delimiter heredoc piped to the
 # lib script in --from-stdin mode. Same Pattern B as send.md.
 #
-# This test exercises lock.md as representative; kick.md uses the same
-# pattern and is covered by symmetry.
+# lock/kick are now reached via the consolidated /beams:admin dispatcher, so
+# this test drives commands/admin.md -> lib/admin.sh -> lib/lock.sh as
+# representative; kick uses the same stdin pattern and is covered by symmetry.
 
 set -euo pipefail
 
@@ -46,19 +47,19 @@ as_a create general >/dev/null
 as_a join   general >/dev/null
 pass "alice initialised as driver"
 
-banner "2. extract the !-block from commands/lock.md"
+banner "2. extract the !-block from commands/admin.md"
 slash_block=$(awk '
   /^```!/ { in_block=1; next }
   /^```/  { if (in_block) { in_block=0; exit } }
   in_block { print }
-' "$PLUGIN/commands/lock.md")
-[ -n "$slash_block" ] || fail "could not extract !-block from lock.md"
+' "$PLUGIN/commands/admin.md")
+[ -n "$slash_block" ] || fail "could not extract !-block from admin.md"
 printf '%s\n' "$slash_block" | head -3 >&2
 pass "extracted !-block ($(printf '%s' "$slash_block" | wc -l) lines)"
 
 banner "3. craft attacker payload with both dollar-paren and backtick"
 ATTACKER_REASON="urgent maintenance \$(touch $MARKER) and \`touch $MARKER_BT\` ok"
-ATTACKER_ARGS="general $ATTACKER_REASON"
+ATTACKER_ARGS="lock general $ATTACKER_REASON"
 pass "payload: $ATTACKER_ARGS"
 
 banner "4. simulate Claude Code's \$ARGUMENTS substitution + exec"
@@ -99,4 +100,4 @@ else
 fi
 
 green ""
-green "round-13 PASS: /beams:lock resists slash-command injection"
+green "round-13 PASS: /beams:admin lock resists slash-command injection"

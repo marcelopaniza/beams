@@ -75,7 +75,7 @@ Three ways, and you decide how proactive it gets:
 - **When you open a terminal** — anything waiting greets you the moment you start or resume a session, so you don't have to type to find it. Always on, and still free (it just arrives a little earlier).
 - **The instant it arrives** — optional. Switch this on for a session that *should* react, and a new message can nudge it to surface or answer the message without you lifting a finger. Off by default.
 
-Turn on the proactive behaviors for a session in one step with `/beams:init <folder> --profile responder`. The details of how each one works live in **[docs/COSTS.md](docs/COSTS.md)** and **[channel/README.md](channel/README.md)**.
+Turn on the proactive behaviors for a session in one step with `/beams:admin init <folder> --profile responder`. The details of how each one works live in **[docs/COSTS.md](docs/COSTS.md)** and **[channel/README.md](channel/README.md)**.
 
 ## What's a beam
 
@@ -106,23 +106,21 @@ Install on each machine and point them all at the same shared folder.
 |---|---|
 | `/beams:start` | Guided first-time setup. Asks the right questions, runs the right commands. **Start here.** |
 | `/beams:name <name>` | Name this terminal so others can address it. |
-| `/beams:create <beam>` | Create a new channel. You become its driver. |
-| `/beams:join <beam>` | Subscribe to a channel (creates it if it doesn't exist). |
-| `/beams:leave <beam>` | Unsubscribe. |
+| `/beams:join <beam>` | Subscribe to a channel (creates it if it doesn't exist; you become its driver). |
 | `/beams:send <beam> <to> <msg>` | Send to a name, `all`, or a comma-list. `@-mention` someone in the message to tag them. |
 | `/beams:read` | Manually check for new messages. (You rarely need this — it happens on its own.) |
 | `/beams:status` | This terminal's setup, subscriptions, and unread counts. |
 | `/beams:list` | Every channel on the shared folder. |
-| `/beams:members <beam>` | Who's on a channel (with driver + banned markers). |
+| `/beams:watch start` | Desktop pings for new messages — a background daemon, zero tokens. |
 
-The driver, watcher, maintenance, and cleanup commands → **[docs/COMMANDS.md](docs/COMMANDS.md)**.
+Everything else — rosters (`members`), leaving, creating a channel without joining, the driver controls, signatures, and maintenance — is grouped under one dispatcher, **`/beams:admin <subcommand>`** (run it with no arguments to list them). Full reference → **[docs/COMMANDS.md](docs/COMMANDS.md)**.
 
 ## Profiles
 
-Want canned defaults — a stock name, a stock set of channels, the proactive behaviors pre-enabled? Pass `--profile <name>` to `/beams:init`:
+Want canned defaults — a stock name, a stock set of channels, the proactive behaviors pre-enabled? Pass `--profile <name>` to `/beams:admin init`:
 
 ```
-/beams:init /path/to/share --profile responder
+/beams:admin init /path/to/share --profile responder
 ```
 
 Beams ships **`responder`** (an autonomous AI bridge that reacts to traffic in real time) and **`hermes`** (a human-facing coordinator session). Add your own by dropping a JSON file into `presets/`. What a profile can set → **[docs/COMMANDS.md](docs/COMMANDS.md)**.

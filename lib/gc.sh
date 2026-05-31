@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# /beams:gc <beam|all> [--older-than 90d] [--dry-run] [--force]
+# /beams:admin gc <beam|all> [--older-than 90d] [--dry-run] [--force]
 #
 # Driver-only (per-beam). Removes message files older than the threshold from
 # a beam's messages/ directory. Default threshold: 90 days. Pass `all` as the

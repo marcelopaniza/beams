@@ -138,13 +138,13 @@ beams::config_require() {
     beams::err "    (in the old layout all terminals shared one identity — that's the bug)"
     beams::err ""
     beams::err "  pick one:"
-    beams::err "    /beams:init <shared-path>"
+    beams::err "    /beams:admin init <shared-path>"
     beams::err "       → fresh per-terminal identity here (recommended — /beams:name only affects this terminal)"
     beams::err "    BEAMS_CONFIG_DIR=$HOME/.config/beams <cmd>"
     beams::err "       → keep using the legacy shared identity"
     exit 1
   fi
-  beams::die "not initialised — run /beams:init <shared-path> first"
+  beams::die "not initialised — run /beams:start first"
 }
 
 beams::config_get() {
@@ -546,7 +546,7 @@ beams::tighten_perms() {
 
 # ── shared write helper ─────────────────────────────────────────────────────
 # Build, sign, and atomically write one .msg file. Used by /beams:send and
-# /beams:kick (which writes its own notice). Centralising means the wire
+# /beams:admin kick (which writes its own notice). Centralising means the wire
 # format only changes in ONE place.
 #
 # Args (required):

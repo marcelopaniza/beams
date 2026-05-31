@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# /beams:unlock <beam> — driver-only: clear the lock on a beam.
+# /beams:admin unlock <beam> — driver-only: clear the lock on a beam.
 
 set -euo pipefail
 source "$(cd "$(dirname "$0")" && pwd)/common.sh"

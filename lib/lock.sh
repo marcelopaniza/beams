@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# /beams:lock <beam> [reason...] — driver-only: lock a beam so only the driver
+# /beams:admin lock <beam> [reason...] — driver-only: lock a beam so only the driver
 # can send. Members can still read.
 
 set -euo pipefail
@@ -7,7 +7,7 @@ source "$(cd "$(dirname "$0")" && pwd)/common.sh"
 beams::require jq
 beams::config_require
 
-# --from-stdin mode: the /beams:lock slash command pipes $ARGUMENTS via a
+# --from-stdin mode: the /beams:admin lock slash command pipes $ARGUMENTS via a
 # quoted-delimiter heredoc so the host shell does NOT expand $(...) or
 # backticks inside the user-supplied reason text. Parse the payload here,
 # where no further bash evaluation can occur. See lib/send.sh for full

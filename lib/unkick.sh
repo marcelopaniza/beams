@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# /beams:unkick <beam> <name-or-uuid> — driver-only: remove a UUID from the banlist.
+# /beams:admin unkick <beam> <name-or-uuid> — driver-only: remove a UUID from the banlist.
 # Note: cannot resolve by friendly name once the member record is gone, so
 # accepts a UUID directly, or a still-present name (some kick flows preserve names).
 

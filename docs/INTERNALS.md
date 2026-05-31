@@ -41,10 +41,10 @@ beams/
 │   ├── .mcp.json.example              #   registration example
 │   ├── README.md                      #   setup + security
 │   └── smoke.sh                       #   self-contained handshake/POST smoke
-├── presets/                           # /beams:init --profile <name> overlays
+├── presets/                           # /beams:admin init --profile <name> overlays
 │   └── hermes.json   responder.json
-├── tests/                             # smoke tests, 16 rounds
-│   ├── round-{1..16}.sh
+├── tests/                             # smoke tests, 17 rounds
+│   ├── round-{1..17}.sh
 │   └── run-all.sh
 ├── assets/                            # README marketing images + sources
 │   ├── beams-hero.jpg        beams-any-ai.jpg        # used in the README

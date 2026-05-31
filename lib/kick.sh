@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# /beams:kick <beam> <name-or-uuid> [reason...] — driver-only.
+# /beams:admin kick <beam> <name-or-uuid> [reason...] — driver-only.
 # Adds the target's UUID to manifest.banned and removes their member record.
 # Cooperative enforcement: other sessions' send/join refuses for banned UUIDs.
 
@@ -9,7 +9,7 @@ beams::require jq
 beams::config_require
 
 # --from-stdin mode: identical pattern to lib/lock.sh and lib/send.sh —
-# parse a heredoc payload piped from the /beams:kick slash command, where
+# parse a heredoc payload piped from the /beams:admin kick slash command, where
 # the quoted-delimiter heredoc has already suppressed $(...) / backtick
 # expansion in the user-supplied reason text. See lib/send.sh for the
 # full rationale.
@@ -46,7 +46,7 @@ target=$(beams::resolve_member "$beam" "$who")
 [ -n "$target" ] || beams::die "no member named '$who' (or matching UUID) in beam '$beam'"
 
 drv=$(beams::driver_uuid "$beam")
-[ "$target" != "$drv" ] || beams::die "refusing to kick the driver — /beams:transfer-driver first"
+[ "$target" != "$drv" ] || beams::die "refusing to kick the driver — /beams:admin transfer-driver first"
 
 if beams::is_banned "$beam" "$target"; then
   printf 'beams: %s is already banned from "%s"\n' "$target" "$beam"

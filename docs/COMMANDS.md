@@ -6,16 +6,18 @@ The [README's "Commands" table](../README.md#commands) covers the everyday subco
 
 Every beam has one **driver** (its creator, transferable). Everyone else is a **rider**.
 
+All driver-only and maintenance operations run through one dispatcher — **`/beams:admin <subcommand>`** — which keeps the everyday slash menu down to eight commands (`send`, `read`, `status`, `join`, `name`, `list`, `watch`, `start`). Run `/beams:admin` with no arguments to list the subcommands. The operations and their arguments are unchanged; only the prefix moved (`/beams:kick …` → `/beams:admin kick …`).
+
 | Command | What it does |
 |---|---|
-| `/beams:lock <beam> [reason]` | Block all sends except from the driver. Riders can still read. |
-| `/beams:unlock <beam>` | Lift the lock. |
-| `/beams:kick <beam> <name-or-uuid> [reason]` | Ban + remove member record + drop a signed kick-notice for the target. |
-| `/beams:unkick <beam> <name-or-uuid>` | Lift a ban. |
-| `/beams:transfer-driver <beam> <name-or-uuid> [--force]` | Hand the wheel. `--force` requires the current driver's member record to be absent or >7 days stale. |
-| `/beams:require-signatures <beam> on\|off` | Tighten the beam: turning ON rejects any unsigned message even from no-pubkey peers. Use after everyone migrates to v0.5+. |
-| `/beams:cleanup-stale <beam>` | Remove inactive member records. Default threshold 30 days. |
-| `/beams:gc <beam\|all>` | Delete old messages from a beam (or every beam). Default threshold 90 days. `--dry-run` supported. |
+| `/beams:admin lock <beam> [reason]` | Block all sends except from the driver. Riders can still read. |
+| `/beams:admin unlock <beam>` | Lift the lock. |
+| `/beams:admin kick <beam> <name-or-uuid> [reason]` | Ban + remove member record + drop a signed kick-notice for the target. |
+| `/beams:admin unkick <beam> <name-or-uuid>` | Lift a ban. |
+| `/beams:admin transfer-driver <beam> <name-or-uuid> [--force]` | Hand the wheel. `--force` requires the current driver's member record to be absent or >7 days stale. |
+| `/beams:admin require-signatures <beam> on\|off` | Tighten the beam: turning ON rejects any unsigned message even from no-pubkey peers. Use after everyone migrates to v0.5+. |
+| `/beams:admin cleanup-stale <beam>` | Remove inactive member records. Default threshold 30 days. |
+| `/beams:admin gc <beam\|all>` | Delete old messages from a beam (or every beam). Default threshold 90 days. `--dry-run` supported. |
 
 **Driver privileges are cooperative.** They depend on every session running this plugin and respecting the manifest. Anyone with raw write access to the share can bypass — treat lock/kick as protocol, not security. The real unforgeability comes from message signatures (see [SECURITY.md](../SECURITY.md)).
 
@@ -83,13 +85,13 @@ Run an arbitrary shell snippet whenever a new message addressed to this session 
 
 | Command | What it does |
 |---|---|
-| `/beams:test [round...]` | Run the smoke-test suite (~135s). Optionally pick rounds, e.g. `/beams:test 7 8`. |
+| `/beams:admin test [round...]` | Run the smoke-test suite (~135s). Optionally pick rounds, e.g. `/beams:admin test 7 8`. |
 
 ## Garbage collection
 
 | What | How |
 |---|---|
-| Old messages on the share | `/beams:gc <beam\|all> --older-than 90d` |
-| Inactive member records | `/beams:cleanup-stale <beam>` |
+| Old messages on the share | `/beams:admin gc <beam\|all> --older-than 90d` |
+| Inactive member records | `/beams:admin cleanup-stale <beam>` |
 | Watcher log | self-rotated to 1MB |
 | Orphan session dirs (`~/.config/beams/sessions/<dead-id>/`) | `rm -rf` manually when you know they're gone |

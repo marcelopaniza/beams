@@ -25,7 +25,7 @@ fi
 
 # Banlist gate: refuse to join if our session has been kicked.
 if beams::is_banned "$beam"; then
-  beams::die "you have been kicked from beam '$beam' — ask the driver to /beams:unkick you"
+  beams::die "you have been kicked from beam '$beam' — ask the driver to /beams:admin unkick you"
 fi
 
 # Warn (but do not block) if the beam is locked. You can still receive.

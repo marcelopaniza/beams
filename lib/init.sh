@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# /beams:init <shared-path> [--force] [--profile <name>] — set the shared
+# /beams:admin init <shared-path> [--force] [--profile <name>] — set the shared
 # folder for this machine/session and generate a session UUID. Safe to re-run:
 # refuses to clobber an existing config unless --force is passed.
 #
@@ -152,6 +152,6 @@ $profile_summary}
 
 next steps:
   /beams:name <friendly-name>     give this session a memorable name
-  /beams:create <beam>             make a new beam, or
+  /beams:admin create <beam>             make a new beam, or
   /beams:join <existing-beam>      subscribe to one
 EOF

@@ -5,136 +5,105 @@ argument-hint: "(no arguments — interactive)"
 
 # /beams:start — guided setup
 
-You are walking the user through their first-time `beams` setup. Be conversational and concise (one or two short questions at a time). Use the answers to call the existing slash commands. Do **not** dump this whole wizard at the user — work through it interactively.
+Walk the user through first-time `beams` setup. Stay conversational — ask only what you need, act on each answer with the matching slash command, and don't dump this whole wizard at them. Most users are on one machine and should be done in a question or two.
 
 ---
 
-## Step 0 — Check current state silently
-
-First, see if this terminal is already initialised:
+## Step 0 — Check state (silent, no output to the user)
 
 ```bash
 test -f "${BEAMS_CONFIG_DIR:-${HOME}/.config/beams/sessions/${CLAUDE_CODE_SESSION_ID}}/config.json" && echo INIT || echo NEW
 ```
 
-- If `INIT`: tell the user "this terminal is already set up" and run `/beams:status`. Ask if they want to (a) add another beam, (b) start over (re-init), or (c) just see status and stop. Then act accordingly. Do NOT re-init silently.
-- If `NEW`: proceed to Step 1.
+- `INIT` → tell them "this terminal is already set up", run `/beams:status`, and ask whether they want to (a) join another beam, (b) start over (re-init), or (c) just see status and stop. Never re-init silently.
+- `NEW` → Step 1.
 
 ---
 
-## Step 1 — Machine scope
+## Step 1 — Offer the fast path first
 
-Ask **exactly one** question, two-line max:
+Most setups are one machine running several terminals off a shared local folder. Offer that before asking anything else:
 
-> Are you running beams on **just this machine**, or do you plan to coordinate with **other machines** too?
->
-> A) Just this machine    B) Multiple machines, this is the **first** one    C) Multiple machines, **joining an existing** setup
+> Want me to set this up with defaults — local folder `~/beams-share`, joined to the `all` beam? I just need a name for this terminal. (Say so instead if you're **joining** a setup another machine already has, or need **multiple machines** to share one beam.)
 
-Branch on the answer.
-
----
-
-## Step 2 — Pick the shared folder
-
-**Case A (single machine):**
-Suggest a local folder. Default recommendation: `~/beams-share`. Tell them:
-> Pick any local folder — all your terminals will see it. I'll use `~/beams-share` unless you want a different path.
-
-Wait for confirmation or a different path. `mkdir -p` it if it doesn't exist, then proceed to Step 3.
-
-**Case B (first of many machines):**
-This is the cross-machine case. The folder needs to be visible to every machine that joins later. Explain briefly (one short paragraph), then ask which transport they want:
-
-> Beams needs a folder whose **contents** are visible on every machine. Pick one:
->
-> 1. **Cloud sync** (Dropbox, iCloud Drive, Syncthing, OneDrive) — easiest if you already have one. Path is a subfolder inside the sync root.
-> 2. **NFS export** — fast, Linux-to-Linux. You'll need root on this machine to export it.
-> 3. **I'll figure it out later** — set up locally for now, mount/sync when you add the next machine.
-
-Recommend option 1 if they don't have a preference. Then ask for the absolute path.
-
-If they pick option 2 (NFS), after the path is chosen, give them the export snippet to run (one-time, as root). Use the actual values:
-
-```bash
-echo "<their-path> *(rw,sync,no_subtree_check,no_root_squash)" | sudo tee -a /etc/exports
-sudo exportfs -ra && sudo systemctl restart nfs-kernel-server
-```
-
-…and tell them to replace `*` with the joining machine's hostname/IP for security.
-
-**Case C (joining an existing setup):**
-Ask:
-> What shared path did you set up on the **first** machine? And how is it reaching this one — NFS mount, Dropbox/Syncthing, something else?
-
-If they don't know, suggest they run `/beams:status` on the other machine and report the `shared_path` value.
-
-Then verify the path is actually present on **this** machine before initialising:
-
-```bash
-ls -la "<their-path>/beams" 2>&1
-```
-
-If the listing fails or shows nothing, **stop and help them mount/sync first**. Give the appropriate instructions based on transport:
-
-- NFS:
+- **They accept** → ask only for the name, then run:
   ```bash
-  sudo mkdir -p "<their-path>"
-  sudo mount -t nfs <atlas-host>:<original-path-on-atlas> "<their-path>"
+  mkdir -p ~/beams-share
   ```
-- Dropbox/iCloud/Syncthing: confirm the sync client is running and the folder appears.
-
-Don't proceed to Step 3 until `ls` shows files (or at least the `beams/` subdir from the other machine).
-
----
-
-## Step 3 — Init this terminal
-
-```
-/beams:init <the-path-from-step-2>
-```
-
-Then ask:
-> What should this terminal be called? (Used by others to address you. Examples: `atlas-main`, `loop`, `felix-deploy`, `phone-tunnel`.)
-
-Apply:
-```
-/beams:name <their-pick>
-```
+  ```
+  /beams:admin init ~/beams-share
+  /beams:name <their-name>
+  /beams:join all
+  ```
+  Skip to Step 4. That's the whole setup in one question.
+- **They want a different local path** → same three commands, swap the path (`mkdir -p` it first).
+- **They're joining an existing setup, or need multiple machines** → Step 2.
 
 ---
 
-## Step 4 — Beam
+## Step 2 — Shared folder (only if they skipped the fast path)
 
-If `/beams:list` shows existing beams, ask which to join (or whether to create a new one). Otherwise prompt:
-> What should we call the beam you join? (`all` is the conventional default for everyone on the share.)
+A beam is just a folder every participant can see. There are two cases:
 
-Apply:
+**Creating, across machines.** The folder's *contents* must appear on every machine. Pick a transport:
+
+- **Cloud sync** (Dropbox / iCloud Drive / Syncthing / OneDrive) — easiest if you already run one; use a subfolder inside the sync root. Recommend this if they have no preference.
+- **NFS** — fast, Linux-to-Linux, needs root here. After they pick a path, give them the one-time export:
+  ```bash
+  echo "<path> <client-host>(rw,sync,no_subtree_check,no_root_squash)" | sudo tee -a /etc/exports
+  sudo exportfs -ra && sudo systemctl restart nfs-kernel-server
+  ```
+  `<client-host>` is the joining machine's hostname or IP — don't leave it as `*`.
+
+**Joining an existing setup.** Ask for the path and how it reaches this machine (NFS / Dropbox / Syncthing). If they're unsure of the path, have them copy `shared_path` from `/beams:status` on the first machine. Then confirm it's actually mounted here before going further:
+
+```bash
+ls -la "<path>/beams" 2>&1
+```
+
+If that errors or is empty, **stop and mount/sync first**:
+
+- NFS: `sudo mkdir -p "<path>" && sudo mount -t nfs <first-host>:<original-path> "<path>"`
+- Cloud sync: confirm the client is running and the folder has appeared.
+
+Don't continue until `ls` shows the `beams/` subfolder.
+
+---
+
+## Step 3 — Name this terminal and join a beam
+
+Point this terminal at the folder and name it:
+
+```
+/beams:admin init <path-from-step-2>
+```
+
+> What should this terminal be called? Others use it to address you — e.g. `atlas-main`, `loop`, `felix-deploy`. Each terminal gets its own name, even when several share one folder.
+
+```
+/beams:name <their-name>
+```
+
+Then the beam. If `/beams:list` shows existing beams, ask which to join; otherwise default to `all`:
+
 ```
 /beams:join <beam-name>
 ```
 
-(It auto-creates if missing; the creator becomes the driver.)
+It auto-creates if missing (the creator becomes driver). Messages addressed to this terminal — or to `all` — then arrive on the next prompt, no polling.
 
 ---
 
-## Step 5 — Watcher (optional)
+## Step 4 — Notifications, then done
 
-> Want desktop notifications when messages arrive? (Zero token cost — it's a background bash daemon, not a Claude loop.) [Y/n]
+> Want desktop notifications for new messages? It's a background daemon — zero token cost. [Y/n]
 
 If yes:
+
 ```
 /beams:watch start 5
 ```
 
-If they say no, skip and tell them they can start it later.
+Finish with `/beams:status` and a one-line recap: this terminal's name, the beam it joined, and the watcher state. Every *other* terminal joins the same way — run `/beams:start` there too; each gets its own identity automatically.
 
----
-
-## Step 6 — Confirm and stop
-
-Run `/beams:status` to show the final state. Mention:
-- this terminal's name and the beam it joined,
-- the watcher status if started,
-- that on every **other** terminal they want on the beam, they should run `/beams:start` too — each terminal gets its own identity automatically (per-`CLAUDE_CODE_SESSION_ID`).
-
-Done. Don't ask "anything else?" — let the user drive from here.
+Stop there — let the user drive.

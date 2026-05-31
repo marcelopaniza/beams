@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# /beams:create <beam> — create a new beam on the shared folder.
+# /beams:admin create <beam> — create a new beam on the shared folder.
 # Idempotent: succeeds quietly if it already exists.
 
 set -euo pipefail

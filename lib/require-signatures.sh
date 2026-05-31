@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# /beams:require-signatures <beam> on|off
+# /beams:admin require-signatures <beam> on|off
 #
 # Driver-only. Set the per-beam `require_signatures` flag in the manifest.
 # When ON: msg_validate rejects any message from a sender whose member

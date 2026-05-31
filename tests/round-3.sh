@@ -66,7 +66,7 @@ echo '{"version":1,"shared_path":"/x","session_id":"legacy","session_name":"lega
   > "$FAKE_HOME/.config/beams/config.json"
 err=$(run_as_term cccccccc-3333-3333-3333-cccccccccccc status 2>&1 || true)
 echo "$err" | grep -q "legacy single-config" || fail "expected legacy hint; got: $err"
-echo "$err" | grep -q "/beams:init"           || fail "expected init suggestion in hint"
+echo "$err" | grep -q "/beams:admin init"           || fail "expected init suggestion in hint"
 pass "legacy hint shown when current terminal lacks a config"
 
 banner "5. explicit BEAMS_CONFIG_DIR override beats CLAUDE_CODE_SESSION_ID"

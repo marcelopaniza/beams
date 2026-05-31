@@ -4,6 +4,21 @@ All notable changes are documented here. Format follows [Keep a Changelog](https
 
 > **Lineage.** Beams is the proactive/reactive fork of [buses](https://github.com/marcelopaniza/buses) — a pure-bash cross-terminal messenger. Beams begins at **0.9.0** and inherits buses' version history below (entries at 0.8.1 and earlier were released as *buses*; the API and on-disk format are shared, the names are not — Beams uses its own `~/.config/beams` and `<shared>/beams/` namespace). The 0.9.0 entry is Beams' first release: the proactive-delivery layer that buses deliberately does not carry.
 
+## [Unreleased]
+
+### Changed
+
+- **Slash-command surface consolidated to 8 everyday commands + `/beams:admin`.** The rare driver-only and maintenance verbs — `create`, `init`, `leave`, `members`/`riders`, `test`, `lock`, `unlock`, `kick`, `unkick`, `transfer-driver`, `require-signatures`, `gc`, `cleanup-stale` — now run through a single **`/beams:admin <subcommand>`** dispatcher instead of standalone slash commands, dropping the slash menu from 22 entries to 9 (`start`, `send`, `read`, `status`, `join`, `name`, `list`, `watch`, `admin`). **Operations, arguments, and driver enforcement are unchanged** — only the prefix moved (`/beams:kick …` → `/beams:admin kick …`). Each verb keeps its exact lib contract: `kick`/`lock` still receive their payload on stdin via the quoted-delimiter heredoc (so the v0.7.3 injection fix is preserved end to end), `test` still forwards round numbers to `tests/run-all.sh`, and `riders` stays an alias of `members`. The `bin/beams` cross-CLI multiplexer keeps its flat `beams <verb>` surface — only the Claude Code slash menu changed.
+
+### Added
+
+- **`lib/admin.sh`** — the dispatcher. One audited entry point with a hard-coded subcommand allowlist; forwards each verb to the same lib the old standalone command called, preserving its argument contract verbatim (no `eval`, no re-expansion). Unknown subcommands are sanitised + length-capped (the same idiom as `bin/beams`). Deliberately does not source `common.sh`, so `/beams:admin init` works before any config exists.
+- **`tests/round-17.sh`** — exercises the dispatcher: routing to `init`/`create`/`leave`, the `members`/`riders` alias, no-arg usage, and unknown-subcommand rejection (exit 2, ESC-free, ≤40-char echo). `tests/round-13.sh` (the lock/kick slash-injection regression) now drives its attack through `commands/admin.md`, proving the consolidated path still refuses `$()`/backtick expansion.
+
+### Removed
+
+- The 14 standalone driver/maintenance command files (`commands/{create,init,leave,members,riders,test,lock,unlock,kick,unkick,transfer-driver,require-signatures,gc,cleanup-stale}.md`). **Migration:** prepend `admin ` to the old verb — e.g. `/beams:gc all` → `/beams:admin gc all`.
+
 ## [0.9.0] — 2026-05-30
 
 Proactive delivery. Messages now reach a session at boot and — opt-in — without the user typing, not only on the next prompt. Three layers, safe-by-default: the only always-on addition is a zero-cost boot check; everything that spends tokens or spawns a process is opt-in. After 4-Sonnet parallel code-review and Opus adversarial security-review gating.

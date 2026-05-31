@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# /beams:transfer-driver <beam> <name-or-uuid> [--force]
+# /beams:admin transfer-driver <beam> <name-or-uuid> [--force]
 #
 # Driver-only by default. With --force, any subscribed member can claim
 # driver — intended as an escape hatch when the current driver's machine

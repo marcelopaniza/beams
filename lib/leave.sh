@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# /beams:leave <beam> — unsubscribe from a beam. Removes member record + cursor.
+# /beams:admin leave <beam> — unsubscribe from a beam. Removes member record + cursor.
 
 set -euo pipefail
 source "$(cd "$(dirname "$0")" && pwd)/common.sh"

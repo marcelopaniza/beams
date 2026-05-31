@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# /beams:cleanup-stale <beam> [--older-than <duration>] [--force] [--dry-run]
+# /beams:admin cleanup-stale <beam> [--older-than <duration>] [--force] [--dry-run]
 #
 # Driver-only. Removes member records whose last_seen is older than the
 # threshold. Defaults to 30 days. Refuses to remove the current driver's
