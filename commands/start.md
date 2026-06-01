@@ -78,7 +78,7 @@ Point this terminal at the folder and name it:
 /beams:admin init <path-from-step-2>
 ```
 
-> What should this terminal be called? Others use it to address you — e.g. `atlas-main`, `loop`, `felix-deploy`. Each terminal gets its own name, even when several share one folder. **The name also survives a Claude restart** — beams keys the identity on it (per project), so a restarted session re-binds by running `/beams:name <same-name>` again, or by answering the prompt beams shows at the next session start.
+> What should this terminal be called? Others use it to address you — e.g. `atlas-main`, `loop`, `felix-deploy`. Each terminal gets its own name, even when several share one folder. **The name also survives a Claude restart** — beams keys the identity on it (per project), so a restarted session re-binds automatically at the next session start when its identity is free, or you can re-bind explicitly by running `/beams:name <same-name>` again (add `--force` if the old session's lease hasn't expired yet).
 
 ```
 /beams:name <their-name>

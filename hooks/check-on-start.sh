@@ -5,13 +5,19 @@
 # so the session greets you already aware of the beam. Silent + ~0 tokens when
 # there's nothing waiting; never blocks or fails session start.
 #
-# Opt-in extra: if this session set react.watch_on_boot=true (e.g. via
-# `/beams:init --profile responder`), also start the background notifier daemon
-# idempotently — so desktop notifications / the Channels bridge come up without
-# the user remembering `/beams:watch start`.
+# Always-on watcher: unless this session opted out (react.watch_on_boot:false,
+# or the BEAMS_DISABLE_WATCH_ON_BOOT=1 env escape hatch for headless/CI/tests),
+# also start the background notifier daemon idempotently — so EVERY session gets
+# the real-time doorbell without the user remembering `/beams:watch start`. The
+# daemon is zero-token (pure polling); the only cost is one background process.
 #
-# Like the other hooks, a missing config (a terminal that never ran
-# /beams:init) makes this a silent no-op: beams stays invisible to non-users.
+# A missing config (a terminal that never ran /beams:init) is normally a silent
+# no-op so beams stays invisible to non-users — EXCEPT when this project has
+# exactly ONE bindable durable identity (free, or already this terminal's). In
+# that case the hook silently rebinds to it (e.g. resuming after a Claude
+# restart) instead of ever prompting. Zero identities, two-or-more, or all-busy
+# (held by another live session) → still a silent no-op; busy names are never
+# stolen (use `/beams:name <n> --force` for a deliberate takeover).
 
 set -uo pipefail
 
@@ -31,43 +37,62 @@ cat >/dev/null 2>&1 || true
   # shellcheck source=../lib/common.sh
   source "$root/lib/common.sh" 2>/dev/null || exit 0
 
+  autobound=""
   if ! beams::config_exists; then
     # Unbound session — typically a fresh session id after a Claude restart.
-    # If this project already has named beams identities, the user has used
-    # beams here before and just needs to re-bind, so surface a one-line prompt
-    # asking which session this is (instead of looking "not initialised"). No
-    # identities here → not a beams project → stay silent.
+    # Policy ("auto-bind, never ask"): if EXACTLY ONE durable identity in this
+    # project is bindable — free (no live holder) or already leased by THIS
+    # terminal — silently rebind to it so the session comes back up on its
+    # beams with zero prompting. Zero or multiple bindable, or all of them busy
+    # with another live session, → stay a silent no-op and never ask. A busy
+    # name held by another session is never stolen.
     idnames=$(beams::list_identity_names 2>/dev/null) || idnames=""
-    [ -n "$idnames" ] || exit 0
-    listing=""
+    [ -n "$idnames" ] || exit 0          # no identities → not a beams project
+    cand=""; n=0
     while IFS= read -r nm; do
       [ -n "$nm" ] || continue
       case "$(beams::lease_state "$(beams::identities_dir)/$nm" 2>/dev/null)" in
-        mine|busy:*) listing="${listing:+$listing, }${nm} (in use)" ;;
-        *)           listing="${listing:+$listing, }${nm}" ;;
+        free|mine) cand="$nm"; n=$((n + 1)) ;;
       esac
     done <<< "$idnames"
-    prompt="This terminal is not yet bound to a beams identity for this project. Existing names here: ${listing}. Ask the user which session this is — an existing name to resume that identity, or a new name — then run /beams:name <name>. If it reports the name is in use because you just restarted, re-run with --force."
-    jq -n --arg ctx "$prompt" \
-      '{hookSpecificOutput: {hookEventName: "SessionStart", additionalContext: $ctx}}' 2>/dev/null || true
-    exit 0
+    [ "$n" -eq 1 ] || exit 0              # ambiguous, or all busy → silent
+
+    # Bind silently. bind_session reassigns the config globals to the identity
+    # so the unread pull + watch-on-boot below run as it. Any failure (e.g. no
+    # session id in this hook's env) degrades to a silent no-op.
+    beams::bind_session "$cand" >/dev/null 2>&1 || exit 0
+    autobound="$cand"
   fi
 
   # Pull unread FIRST — this advances the NOTIFY cursor too, so the notifier
   # daemon we may start next won't re-notify messages we just surfaced at boot.
   out=$("$root/lib/check.sh" --hook SessionStart 2>/dev/null) || out=""
 
-  # Opt-in: bring up the notifier daemon on boot. Idempotent (watch.sh no-ops
-  # when one is already running), detached, and fully silenced so its "watcher
-  # started" line never leaks into the session context. Pin BEAMS_CONFIG_DIR so
-  # the daemon resolves the exact same identity this hook just did.
-  if [ "$(beams::react_flag watch_on_boot)" = "true" ]; then
+  # Default-on: bring up the notifier daemon on boot so every session has the
+  # real-time doorbell. Opt out per-session with react.watch_on_boot:false, or
+  # globally with BEAMS_DISABLE_WATCH_ON_BOOT=1 (headless/CI/tests). Idempotent
+  # (watch.sh no-ops when one is already running), detached, and fully silenced
+  # so its "watcher started" line never leaks into the session context. Pin
+  # BEAMS_CONFIG_DIR so the daemon resolves the exact same identity this hook did.
+  if [ "${BEAMS_DISABLE_WATCH_ON_BOOT:-}" != "1" ] \
+     && [ "$(beams::config_get '.react.watch_on_boot')" != "false" ]; then
     export BEAMS_CONFIG_DIR
     nohup bash "$root/lib/watch.sh" start >/dev/null 2>&1 </dev/null &
     disown 2>/dev/null || true
   fi
 
-  [ -n "$out" ] && printf '%s' "$out"
+  if [ -n "$autobound" ]; then
+    # Inform the model who it now is (a statement, not a prompt) and fold in any
+    # unread the pull surfaced, so one SessionStart context covers both.
+    note="beams: this terminal had no bound identity, so it auto-bound to \"$autobound\" for this project (e.g. resuming after a Claude restart). You are now live on that identity's subscribed beams."
+    extra=""
+    [ -n "$out" ] && extra=$(printf '%s' "$out" | jq -r '.hookSpecificOutput.additionalContext // empty' 2>/dev/null)
+    if [ -n "$extra" ]; then ctx=$(printf '%s\n\n%s' "$note" "$extra"); else ctx="$note"; fi
+    jq -n --arg ctx "$ctx" \
+      '{hookSpecificOutput: {hookEventName: "SessionStart", additionalContext: $ctx}}' 2>/dev/null || true
+  else
+    [ -n "$out" ] && printf '%s' "$out"
+  fi
 } 2>/dev/null
 
 exit 0

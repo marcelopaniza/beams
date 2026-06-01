@@ -111,7 +111,7 @@ Install on each machine and point them all at the same shared folder.
 | `/beams:read` | Manually check for new messages. (You rarely need this — it happens on its own.) |
 | `/beams:status` | This terminal's setup, subscriptions, and unread counts. |
 | `/beams:list` | Every channel on the shared folder. |
-| `/beams:watch start` | Desktop pings for new messages — a background daemon, zero tokens. |
+| `/beams:watch start` | Desktop pings for new messages — a background daemon, zero tokens. Auto-armed on boot by default; use this for manual control / `stop`. |
 
 Everything else — rosters (`members`), leaving, creating a channel without joining, the driver controls, signatures, and maintenance — is grouped under one dispatcher, **`/beams:admin <subcommand>`** (run it with no arguments to list them). Full reference → **[docs/COMMANDS.md](docs/COMMANDS.md)**.
 

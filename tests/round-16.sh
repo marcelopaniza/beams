@@ -11,18 +11,39 @@
 #      carrying the inbox when a message arrived.
 #   6. The stop_hook_active guard short-circuits (no re-block) AND does not
 #      consume the message (a later non-active fire still delivers it).
-#   7. Fresh configs default react flags to false; the `responder` preset
-#      flips them on.
-#   8. With react.watch_on_boot=true, SessionStart brings up the notifier
-#      daemon (the only execution of that opt-in autostart path).
+#   7. Fresh configs default watch_on_boot=true (always-armed) + on_stop=false;
+#      the `responder` preset additionally turns on_stop on.
+#   8. SessionStart brings up the notifier daemon when watch_on_boot is on
+#      (now the default).
 #
-# Checks 1-7 spawn no daemon/notifier (pure hook logic, portable under CI);
-# check 8 starts one watcher and the cleanup trap kills it.
+# And the v0.10.0 "auto-bind, never ask" SessionStart policy for an unbound
+# session (a fresh session id after a restart):
+#   9.  exactly one bindable (free) identity → silently rebind to it, no prompt.
+#   10. the lone identity is busy (held by another live session) → silent.
+#   11. two-or-more bindable identities → silent (ambiguous, never guesses).
+#
+# The watcher auto-arms on boot by default now, so the suite exports
+# BEAMS_DISABLE_WATCH_ON_BOOT=1 to stay daemon-free (portable under CI); only
+# check 8 re-enables it, starts one watcher, and the cleanup trap kills it.
 
 set -euo pipefail
 
 PLUGIN="${PLUGIN_ROOT:-$(cd "$(dirname "$0")/.." && pwd)}"
 TMPDIR=$(mktemp -d /tmp/beams-test-r16.XXXXXX)
+# Sandbox the whole beams home + project key so this round neither reads nor
+# writes the real ~/.config/beams. Without this, the SessionStart unbound-
+# identity path (subtest 3 + the auto-bind checks below) would resolve to the
+# developer's live identities dir and see their real identities. Mirrors the
+# isolation rounds 3 & 18 already do.
+export HOME="$TMPDIR/home"
+export XDG_CONFIG_HOME="$TMPDIR/xdg"
+export CLAUDE_PROJECT_DIR="$TMPDIR/proj"
+mkdir -p "$HOME" "$XDG_CONFIG_HOME" "$CLAUDE_PROJECT_DIR"
+
+# The watcher auto-arms on boot by default now. Suppress it across the suite so
+# subtests don't spawn notifier daemons (or fire real notify-send popups);
+# subtest 8 re-enables it for the one invocation that tests the autostart.
+export BEAMS_DISABLE_WATCH_ON_BOOT=1
 SHARED="$TMPDIR/share"
 CFG_A="$TMPDIR/cfg-a"        # alice — recipient, runs the hooks
 CFG_B="$TMPDIR/cfg-b"        # bob   — sender
@@ -126,9 +147,9 @@ echo "$out" | jq -e '.reason | contains("guard-msg")' >/dev/null \
 pass "guard short-circuits and preserves the message"
 
 # ── 7. react defaults + responder preset ───────────────────────────────────
-banner "fresh config defaults react flags off; responder preset flips them on"
-jq -e '.react.watch_on_boot == false and .react.on_stop == false' "$CFG_B/config.json" >/dev/null \
-  || fail "fresh config should default react flags to false"
+banner "fresh config defaults watcher ON + on_stop OFF; responder preset also enables on_stop"
+jq -e '.react.watch_on_boot == true and .react.on_stop == false' "$CFG_B/config.json" >/dev/null \
+  || fail "fresh config should default watch_on_boot=true, on_stop=false"
 ( export BEAMS_CONFIG_DIR="$CFG_C"; "$PLUGIN/lib/init.sh" "$SHARED" --profile responder >/dev/null )
 jq -e '.role == "responder" and .react.watch_on_boot == true and .react.on_stop == true' "$CFG_C/config.json" >/dev/null \
   || { jq '.' "$CFG_C/config.json" | sed 's/^/    /'; fail "responder preset did not enable react flags"; }
@@ -138,7 +159,8 @@ pass "react defaults + responder preset correct"
 banner "react.watch_on_boot=true → SessionStart brings up the watcher (once)"
 # CFG_C was initialised with --profile responder above (watch_on_boot=true), so
 # firing its SessionStart hook must bring up the background notifier daemon.
-hook "$CFG_C" check-on-start.sh '{"source":"startup"}' >/dev/null 2>&1
+# Re-enable autostart for just this invocation (the suite disables it globally).
+( unset BEAMS_DISABLE_WATCH_ON_BOOT; hook "$CFG_C" check-on-start.sh '{"source":"startup"}' ) >/dev/null 2>&1
 wpid=""
 for _ in $(seq 1 15); do
   for f in "$CFG_C"/state/*/watcher.pid; do
@@ -150,6 +172,54 @@ done
 { [ -n "$wpid" ] && kill -0 "$wpid" 2>/dev/null; } \
   || fail "watch_on_boot did not bring up a live watcher daemon"
 pass "watch_on_boot autostarted the watcher (pid $wpid)"
+
+# ── 9-11. SessionStart "auto-bind, never ask" for an unbound session ────────
+# These use NO BEAMS_CONFIG_DIR override (so name.sh runs the real bind
+# machinery and creates durable, name-keyed identities) and a fresh
+# CLAUDE_CODE_SESSION_ID per session (so each is genuinely unbound until the
+# hook decides). Each case gets its own project dir → its own identities dir,
+# so the cases don't contaminate each other.
+mk_identity() {  # $1=session-id  $2=name  $3=project-dir  → creates a durable identity
+  ( unset BEAMS_CONFIG_DIR
+    export CLAUDE_CODE_SESSION_ID="$1" CLAUDE_PROJECT_DIR="$3"
+    mkdir -p "$3"
+    "$PLUGIN/lib/init.sh" "$SHARED" >/dev/null
+    "$PLUGIN/lib/name.sh" "$2"      >/dev/null )
+}
+idents_of() { printf '%s/beams/projects/%s/identities' \
+  "$XDG_CONFIG_HOME" "$(printf '%s' "$1" | sed 's,/,-,g')"; }
+boot_unbound() {  # $1=fresh-session-id  $2=project-dir  → prints the hook's stdout
+  ( unset BEAMS_CONFIG_DIR
+    export CLAUDE_CODE_SESSION_ID="$1" CLAUDE_PROJECT_DIR="$2" CLAUDE_PLUGIN_ROOT="$PLUGIN"
+    printf '%s' '{"source":"startup"}' | "$PLUGIN/hooks/check-on-start.sh" )
+}
+
+banner "SessionStart auto-binds (never asks) when exactly one free identity exists"
+P_ONE="$TMPDIR/proj-autobind"
+mk_identity sid-solo solo "$P_ONE"
+rm -f "$(idents_of "$P_ONE")/solo/lease.json"   # release the lease → 'solo' is free
+out=$(boot_unbound sid-fresh1 "$P_ONE")
+echo "$out" | jq -e '.hookSpecificOutput.additionalContext | test("auto-bound to \"solo\"")' >/dev/null \
+  || { echo "$out" | sed 's/^/    /'; fail "did not auto-bind to the lone free identity"; }
+[ "$(cat "$XDG_CONFIG_HOME/beams/sessions/sid-fresh1/bound" 2>/dev/null)" = "solo" ] \
+  || fail "auto-bind did not write the bound pointer for the new session"
+pass "auto-bound silently to the lone free identity"
+
+banner "SessionStart stays silent when the lone identity is busy (held elsewhere)"
+P_BUSY="$TMPDIR/proj-busy"
+mk_identity sid-busy held "$P_BUSY"             # lease just claimed by sid-busy → busy
+out=$(boot_unbound sid-fresh2 "$P_BUSY")
+[ -z "$out" ] || { echo "$out" | sed 's/^/    /'; fail "auto-bound (or prompted) for a busy identity — must never steal it"; }
+pass "silent for a busy identity (not stolen)"
+
+banner "SessionStart stays silent when two identities are bindable (ambiguous)"
+P_MULTI="$TMPDIR/proj-multi"
+mk_identity sid-a aaa "$P_MULTI"
+mk_identity sid-b bbb "$P_MULTI"
+rm -f "$(idents_of "$P_MULTI")/aaa/lease.json" "$(idents_of "$P_MULTI")/bbb/lease.json"
+out=$(boot_unbound sid-fresh3 "$P_MULTI")
+[ -z "$out" ] || { echo "$out" | sed 's/^/    /'; fail "auto-bound (or prompted) with two bindable identities — must never guess"; }
+pass "silent when the choice is ambiguous"
 
 banner "round 16 complete"
 green "ALL ROUND-16 CHECKS PASSED"

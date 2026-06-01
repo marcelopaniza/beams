@@ -15,6 +15,9 @@ export XDG_CONFIG_HOME="$TMP/xdg"        # sandbox the whole ~/.config/beams tre
 export HOME="$TMP/home"                   # keep legacy-config detection inert
 export CLAUDE_PROJECT_DIR="$TMP/proj"
 mkdir -p "$XDG_CONFIG_HOME" "$HOME" "$CLAUDE_PROJECT_DIR"
+# The watcher auto-arms on boot by default now; this round tests identity/binding,
+# not the watcher, so suppress autostart to keep `boot` from spawning daemons.
+export BEAMS_DISABLE_WATCH_ON_BOOT=1
 SHARED="$TMP/share"; mkdir -p "$SHARED"
 BASE="$XDG_CONFIG_HOME/beams"
 PKEY=$(printf '%s' "$CLAUDE_PROJECT_DIR" | sed 's,/,-,g')
@@ -97,11 +100,20 @@ printf '%s' "$sout" | grep -qE 'bound:[[:space:]]+loop' || fail "status missing 
 printf '%s' "$sout" | grep -qE 'in use:[[:space:]]+yes'  || fail "status missing 'in use: yes': $sout"
 pass "status reports bound=loop, in use=yes"
 
-banner "10. SessionStart hook prompts an unbound session to bind (project has identities)"
+banner "10. SessionStart auto-binds an unbound session to a lone FREE identity; never asks"
+# 'loop' (held by sess-3) and 'game2' (held by sess-4) both hold fresh leases →
+# an unbound session must NOT bind to a busy name and must NOT prompt: silent.
 bout=$(boot boot-sess)
-printf '%s' "$bout" | grep -q 'not yet bound' || fail "boot hook didn't emit a bind prompt: $bout"
-printf '%s' "$bout" | grep -q 'loop'          || fail "boot prompt didn't list known names: $bout"
-pass "SessionStart prompts an unbound session to /beams:name"
+[ -z "$bout" ] || fail "boot hook spoke while every identity was busy (must stay silent, never steal): $bout"
+# Free exactly one identity (its holder went away) → now exactly one bindable,
+# so an unbound session silently rebinds to it — no prompt, no question.
+rm -f "$IDENT/loop/lease.json"
+bout=$(boot boot-sess2)
+printf '%s' "$bout" | jq -e '.hookSpecificOutput.additionalContext | test("auto-bound to \"loop\"")' >/dev/null \
+  || fail "boot hook didn't auto-bind to the lone free identity: $bout"
+[ "$(cat "$BASE/sessions/boot-sess2/bound" 2>/dev/null)" = loop ] \
+  || fail "auto-bind didn't write boot-sess2's bound pointer"
+pass "SessionStart auto-binds to a lone free identity; silent when busy or ambiguous"
 
 banner "11. Stop hook delivers to a bound, opted-in session (proactive, no new prompt)"
 run sess-3 join general >/dev/null                       # sess-3 is bound to 'loop'
@@ -118,4 +130,4 @@ printf '%s' "$stopout" | grep -q 'ping-without-typing' || fail "Stop hook didn't
 pass "Stop hook surfaces a waiting message to a bound opted-in session"
 
 green ""
-green "round-18 PASS: durable identity + bind/rebind/migrate + lease + status + boot prompt + Stop delivery"
+green "round-18 PASS: durable identity + bind/rebind/migrate + lease + status + boot auto-bind + Stop delivery"

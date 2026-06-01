@@ -24,7 +24,7 @@ beams/
 ├── hooks/
 │   ├── hooks.json                       #   UserPromptSubmit + SessionStart + Stop
 │   ├── check-messages.sh                #   UserPromptSubmit: pull unread on prompt
-│   ├── check-on-start.sh                #   SessionStart: surface unread at boot (+ opt-in daemon)
+│   ├── check-on-start.sh                #   SessionStart: surface unread at boot (+ auto-arm watcher by default)
 │   └── respond-on-stop.sh               #   Stop: opt-in active-session sustain
 ├── lib/                               # bash implementation
 │   ├── common.sh                      #   helpers (crypto, validate, write, perms)
@@ -74,8 +74,8 @@ A Claude Code session id (`$CLAUDE_CODE_SESSION_ID`) is **ephemeral** — a fres
     └── lease.json                 # { bound_session, last_seen } — the in-use lease
 ```
 
-- **Resolution** (`beams::_resolve_config_dir`): explicit `$BEAMS_CONFIG_DIR` wins; otherwise, if `sessions/<id>/bound` exists, resolve to that named identity; else the ephemeral `sessions/<id>/` (empty → "not initialised" until the SessionStart hook prompts for a name).
-- **Binding** (`/beams:name <name>`): rebinds to an existing identity (restoring its UUID + subscriptions), migrates a scratch config into one, or creates a fresh one (inheriting the project's shared folder). A new session id after a restart re-binds to the same name and is the same rider.
+- **Resolution** (`beams::_resolve_config_dir`): explicit `$BEAMS_CONFIG_DIR` wins; otherwise, if `sessions/<id>/bound` exists, resolve to that named identity; else the ephemeral `sessions/<id>/` (empty → "not initialised" until the SessionStart hook auto-binds it to the project's lone bindable identity).
+- **Binding** (`/beams:name <name>`): rebinds to an existing identity (restoring its UUID + subscriptions), migrates a scratch config into one, or creates a fresh one (inheriting the project's shared folder). A new session id after a restart re-binds to the same name and is the same rider — and when exactly one identity is free, the SessionStart hook does this automatically, with no prompt.
 - **In-use lease**: `lease.json` records which session holds a name and when it was last seen (refreshed each prompt by `check.sh`). Within `BEAMS_INUSE_STALE_SECONDS` (default 900) a name held by *another* session blocks a bind unless `--force`; past that the lease is treated as released. `/beams:status` surfaces it as **in use: yes/no**.
 
 ## Message format

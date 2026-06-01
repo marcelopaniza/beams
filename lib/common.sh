@@ -69,7 +69,8 @@ beams::_resolve_config_dir() {
     # lives in the per-session dir and names the identity; resolution then
     # redirects to projects/<project>/identities/<name>. An unbound session
     # keeps using its ephemeral per-session dir (empty → "not initialised"
-    # until the SessionStart hook prompts for a name).
+    # until the SessionStart hook auto-binds it to the project's lone free
+    # identity, when exactly one is bindable).
     local sdir="$base/sessions/$CLAUDE_CODE_SESSION_ID"
     if [ -f "$sdir/bound" ]; then
       local bname; bname=$(beams::_safe_key "$(cat "$sdir/bound" 2>/dev/null)")
@@ -370,7 +371,7 @@ beams::config_init_file() {
       claude_code_session_id: $cc_sid,
       beams: [],
       created: $created,
-      react: { watch_on_boot: false, on_stop: false }
+      react: { watch_on_boot: true, on_stop: false }
     }' > "$BEAMS_CONFIG_FILE"
   printf '%s' "$sid"
 }
