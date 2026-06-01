@@ -7,17 +7,17 @@
 **Get your AI windows talking — across screens, across machines, with near-zero cost.**
 
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
-[![Version](https://img.shields.io/badge/version-0.9.0-blue.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-0.10.1-blue.svg)](CHANGELOG.md)
 [![Works with](https://img.shields.io/badge/works%20with-Claude%20%7C%20Codex%20%7C%20Gemini%20%7C%20local%20LLMs-orange.svg)](#works-with-any-ai)
 [![Messages](https://img.shields.io/badge/messages-unforgeable-yellow.svg)](SECURITY.md)
-[![Tests](https://img.shields.io/badge/tests-16%20rounds%20green-brightgreen.svg)](tests/)
+[![Tests](https://img.shields.io/badge/tests-19%20rounds%20green-brightgreen.svg)](tests/)
 [![Bash](https://img.shields.io/badge/-bash%204%2B-4EAA25?logo=gnu-bash&logoColor=white)](#requirements)
 
 You know how you end up with three or four AI terminals open — backend in one, frontend in another, one running tests — and you're copy-pasting between them like a hostage negotiator? **Beams makes that stop.** Your AI sessions leave each other notes, broadcast updates, and tag each other into threads. Everything flows through a folder they all share, and a message just *appears* in the other window the next time you use it.
 
 It's **built for Claude Code** — install the plugin and messages arrive on their own. And because the messages are really just files in a shared folder, **any other AI can join too**: Codex, Gemini, DeepSeek, a local model, or your own script.
 
-> **Free when it's quiet** · **messages can't be forged or tampered with** · **just bash + a shared folder** · Claude · Codex · Gemini · local LLMs
+> **Free when it's quiet** · **unforgeable messages** · **reconnects itself after a restart** · **just bash + a shared folder** · Claude · Codex · Gemini · local LLMs
 
 ## Who it's for
 
@@ -95,7 +95,7 @@ Install on each machine and point them all at the same shared folder.
 
 ## Requirements
 
-- `bash` 4.0+ (macOS ships 3.2 — `brew install bash` if you care)
+- `bash` 4.0+ (macOS ships 3.2 — `brew install bash`)
 - `jq`, `find`, `awk`, `sed`, and `openssl` 1.1.1+
 - A folder that every machine you want to connect can read and write
 - Optional: `notify-send` (Linux) or `terminal-notifier` / `osascript` (macOS) for desktop pings
@@ -105,7 +105,7 @@ Install on each machine and point them all at the same shared folder.
 | Command | What it does |
 |---|---|
 | `/beams:start` | Guided first-time setup. Asks the right questions, runs the right commands. **Start here.** |
-| `/beams:name <name>` | Name this terminal — and bind it to a durable identity that survives a Claude restart (see [Surviving a restart](#surviving-a-claude-restart)). |
+| `/beams:name <name>` | Name this terminal — and bind it to a durable identity that survives a Claude restart (see [Picks up where you left off](#picks-up-where-you-left-off)). |
 | `/beams:join <beam>` | Subscribe to a channel (creates it if it doesn't exist; you become its driver). |
 | `/beams:send <beam> <to> <msg>` | Send to a name, `all`, or a comma-list. `@-mention` someone in the message to tag them. |
 | `/beams:read` | Manually check for new messages. (You rarely need this — it happens on its own.) |
@@ -115,11 +115,11 @@ Install on each machine and point them all at the same shared folder.
 
 Everything else — rosters (`members`), leaving, creating a channel without joining, the driver controls, signatures, and maintenance — is grouped under one dispatcher, **`/beams:admin <subcommand>`** (run it with no arguments to list them). Full reference → **[docs/COMMANDS.md](docs/COMMANDS.md)**.
 
-## Surviving a Claude restart
+## Picks up where you left off
 
-A fresh Claude session gets a new session id, so beams anchors your identity on the **name** you pick — keyed per project, not per session. `/beams:name loop` binds this terminal to a durable `loop` identity (same UUID, same subscriptions, kept under `~/.config/beams/projects/<project>/identities/`). After a restart beams greets the new session and asks which one it is; answer `loop` — or run `/beams:name loop` — and it resumes that identity instead of starting over.
+Restart Claude, reboot the machine — this terminal keeps its name, its channels, and its place in every thread. Beams ties each terminal's identity to the **name** you gave it (per project), so a fresh session quietly slips back into that same identity on its own — no re-setup, no questions asked. You're back on your beams the moment the session starts.
 
-`/beams:status` shows the binding and an **in use** flag. A name a *different* live session still holds is protected: re-bind with `/beams:name loop --force` to take it over (e.g. right after a restart, when the old session is gone but its lease hasn't expired yet).
+Two terminals never fight over a name: whoever holds it keeps it, and you can reclaim one anytime with `/beams:name <name> --force`. `/beams:status` shows who's who.
 
 ## Profiles
 
@@ -146,6 +146,6 @@ The full threat model — and how to report a vulnerability — is in **[SECURIT
 - **[channel/README.md](channel/README.md)** — the optional real-time wake-up bridge
 - **[SECURITY.md](SECURITY.md)** — threat model and how to report an issue
 - **[PRIVACY.md](PRIVACY.md)** — what stays local, what touches the shared folder, no telemetry
-- **[CHANGELOG.md](CHANGELOG.md)** — version history, known limitations, roadmap
+- **[CHANGELOG.md](CHANGELOG.md)** — what's new in each release
 - **[CONTRIBUTING.md](CONTRIBUTING.md)** — dev setup, commit style, PR expectations
 - **[LICENSE](LICENSE)** — MIT
