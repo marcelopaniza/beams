@@ -173,6 +173,22 @@ done
   || fail "watch_on_boot did not bring up a live watcher daemon"
 pass "watch_on_boot autostarted the watcher (pid $wpid)"
 
+# ── 8b. react.watch_on_boot:false MUST opt out (regression) ─────────────────
+# config_get appends `// ""` and jq's `//` collapses JSON false → "", so the
+# hook must read the raw value to honour an explicit false. Otherwise the
+# documented per-session opt-out is silently dead and the watcher always arms.
+banner "watch_on_boot:false suppresses the boot watcher (opt-out works)"
+tmp=$(mktemp); jq '.react.watch_on_boot = false' "$CFG_B/config.json" > "$tmp" && mv "$tmp" "$CFG_B/config.json"
+( unset BEAMS_DISABLE_WATCH_ON_BOOT; hook "$CFG_B" check-on-start.sh '{"source":"startup"}' ) >/dev/null 2>&1
+sleep 1.5
+optout_pid=""
+for f in "$CFG_B"/state/*/watcher.pid; do [ -f "$f" ] && optout_pid=$(cat "$f" 2>/dev/null) || true; done
+if [ -n "$optout_pid" ] && kill -0 "$optout_pid" 2>/dev/null; then
+  kill "$optout_pid" 2>/dev/null || true
+  fail "watch_on_boot:false did NOT suppress the watcher (opt-out broken): pid $optout_pid"
+fi
+pass "watch_on_boot:false suppressed the boot watcher"
+
 # ── 9-11. SessionStart "auto-bind, never ask" for an unbound session ────────
 # These use NO BEAMS_CONFIG_DIR override (so name.sh runs the real bind
 # machinery and creates durable, name-keyed identities) and a fresh

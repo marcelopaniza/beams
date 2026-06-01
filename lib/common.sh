@@ -316,6 +316,7 @@ beams::bind_session() {
     [ "$__bind_wait" -gt 50 ] && beams::die "name '$name' is being bound by another session (stale lock? rmdir '$lock_dir')"
     sleep 0.1
   done
+  local __prev_exit_trap; __prev_exit_trap=$(trap -p EXIT)   # don't clobber a caller's EXIT trap
   trap 'rmdir "$lock_dir" 2>/dev/null || true' EXIT
 
   if [ -f "$idir/config.json" ]; then
@@ -351,7 +352,8 @@ beams::bind_session() {
   beams::config_set '.session_name = $v' --arg v "$name"
   beams::lease_claim
   mkdir -p "$sdir"; printf '%s' "$key" > "$sdir/bound"
-  rmdir "$lock_dir" 2>/dev/null || true; trap - EXIT   # end of critical section
+  rmdir "$lock_dir" 2>/dev/null || true                # end of critical section
+  eval "${__prev_exit_trap:-trap - EXIT}"              # restore caller's prior EXIT trap (or clear)
 
   # Re-publish presence so peers see this session live on its subscriptions.
   local beam

@@ -84,8 +84,13 @@ cat >/dev/null 2>&1 || true
   # (watch.sh no-ops when one is already running), detached, and fully silenced
   # so its "watcher started" line never leaks into the session context. Pin
   # BEAMS_CONFIG_DIR so the daemon resolves the exact same identity this hook did.
-  if [ "${BEAMS_DISABLE_WATCH_ON_BOOT:-}" != "1" ] \
-     && [ "$(beams::config_get '.react.watch_on_boot')" != "false" ]; then
+  # Read the raw value, NOT beams::config_get — config_get appends `// ""`, and
+  # jq's `//` treats JSON false as empty, so an explicit watch_on_boot:false
+  # would collapse to "" and the `!= "false"` test would WRONGLY arm. Plain jq
+  # keeps false/true/null distinct: null/absent → arm (default-on), explicit
+  # false → opt out.
+  __wob=$(jq -r '.react.watch_on_boot' "$BEAMS_CONFIG_FILE" 2>/dev/null)
+  if [ "${BEAMS_DISABLE_WATCH_ON_BOOT:-}" != "1" ] && [ "$__wob" != "false" ]; then
     export BEAMS_CONFIG_DIR
     nohup bash "$root/lib/watch.sh" start >/dev/null 2>&1 </dev/null &
     disown 2>/dev/null || true
