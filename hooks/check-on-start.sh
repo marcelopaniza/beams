@@ -57,11 +57,21 @@ cat >/dev/null 2>&1 || true
     done <<< "$idnames"
     [ "$n" -eq 1 ] || exit 0              # ambiguous, or all busy → silent
 
-    # Bind silently. bind_session reassigns the config globals to the identity
-    # so the unread pull + watch-on-boot below run as it. Any failure (e.g. no
-    # session id in this hook's env) degrades to a silent no-op.
-    beams::bind_session "$cand" >/dev/null 2>&1 || exit 0
-    autobound="$cand"
+    # Bind silently, in a SUBSHELL: bind_session calls beams::die (exit) on
+    # recoverable failures (lost the concurrent-bind race → busy, no session id,
+    # bad name). A bare call can't catch a function's exit, so the die would
+    # crash the hook instead of degrading to the documented silent no-op; the
+    # subshell scopes the exit so `|| exit 0` catches it.
+    if ( beams::bind_session "$cand" >/dev/null 2>&1 ); then
+      autobound="$cand"
+      # bind_session reassigned BEAMS_CONFIG_* inside the subshell (lost here);
+      # recompute for the now-bound identity so the pull + watch below run as it.
+      BEAMS_CONFIG_DIR="$(beams::identities_dir)/$(beams::_safe_key "$cand")"
+      BEAMS_CONFIG_FILE="$BEAMS_CONFIG_DIR/config.json"
+      BEAMS_IDENTITY_KEY="$BEAMS_CONFIG_DIR/identity.key"
+    else
+      exit 0
+    fi
   fi
 
   # Pull unread FIRST — this advances the NOTIFY cursor too, so the notifier
@@ -85,11 +95,15 @@ cat >/dev/null 2>&1 || true
     # Inform the model who it now is (a statement, not a prompt) and fold in any
     # unread the pull surfaced, so one SessionStart context covers both.
     note="beams: this terminal had no bound identity, so it auto-bound to \"$autobound\" for this project (e.g. resuming after a Claude restart). You are now live on that identity's subscribed beams."
-    extra=""
-    [ -n "$out" ] && extra=$(printf '%s' "$out" | jq -r '.hookSpecificOutput.additionalContext // empty' 2>/dev/null)
+    extra=""; sysmsg=""
+    if [ -n "$out" ]; then
+      extra=$(printf '%s' "$out" | jq -r '.hookSpecificOutput.additionalContext // empty' 2>/dev/null)
+      sysmsg=$(printf '%s' "$out" | jq -r '.systemMessage // empty' 2>/dev/null)
+    fi
     if [ -n "$extra" ]; then ctx=$(printf '%s\n\n%s' "$note" "$extra"); else ctx="$note"; fi
-    jq -n --arg ctx "$ctx" \
-      '{hookSpecificOutput: {hookEventName: "SessionStart", additionalContext: $ctx}}' 2>/dev/null || true
+    jq -n --arg ctx "$ctx" --arg sysmsg "$sysmsg" \
+      'if $sysmsg == "" then {hookSpecificOutput: {hookEventName: "SessionStart", additionalContext: $ctx}}
+       else {hookSpecificOutput: {hookEventName: "SessionStart", additionalContext: $ctx}, systemMessage: $sysmsg} end' 2>/dev/null || true
   else
     [ -n "$out" ] && printf '%s' "$out"
   fi

@@ -302,6 +302,22 @@ beams::bind_session() {
   local idir; idir="$(beams::identities_dir)/$key"
   local action
 
+  # Serialize the lease-check → claim → bound-pointer write below so two
+  # concurrent binds to the SAME identity (e.g. two auto-binding SessionStart
+  # hooks on a multi-terminal cold start) can't both pass the lease gate and
+  # end up sharing one UUID/key. mkdir is atomic everywhere (incl. NFS) — the
+  # same idiom as watch.sh's start lock. The loser blocks ~one critical section,
+  # then reads the now-claimed lease as busy and is refused (unless --force).
+  # Released right after the bound write; the trap is the die/crash safety net.
+  mkdir -p "$(dirname "$idir")"
+  local lock_dir="${idir}.bindlock" __bind_wait=0
+  while ! mkdir "$lock_dir" 2>/dev/null; do
+    __bind_wait=$((__bind_wait + 1))
+    [ "$__bind_wait" -gt 50 ] && beams::die "name '$name' is being bound by another session (stale lock? rmdir '$lock_dir')"
+    sleep 0.1
+  done
+  trap 'rmdir "$lock_dir" 2>/dev/null || true' EXIT
+
   if [ -f "$idir/config.json" ]; then
     # Existing identity → lease gate, then rebind (config/UUID kept as-is).
     local state; state=$(beams::lease_state "$idir")
@@ -335,6 +351,7 @@ beams::bind_session() {
   beams::config_set '.session_name = $v' --arg v "$name"
   beams::lease_claim
   mkdir -p "$sdir"; printf '%s' "$key" > "$sdir/bound"
+  rmdir "$lock_dir" 2>/dev/null || true; trap - EXIT   # end of critical section
 
   # Re-publish presence so peers see this session live on its subscriptions.
   local beam

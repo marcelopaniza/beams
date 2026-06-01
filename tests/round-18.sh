@@ -129,5 +129,40 @@ printf '%s' "$stopout" | grep -q '"decision"'        || fail "Stop hook didn't e
 printf '%s' "$stopout" | grep -q 'ping-without-typing' || fail "Stop hook didn't surface the waiting message: $stopout"
 pass "Stop hook surfaces a waiting message to a bound opted-in session"
 
+# ── 12. concurrent unbound binds: the lock prevents a double-bind (race), and ─
+#        a losing bind degrades to a silent no-op instead of crashing the hook ─
+banner "12. concurrent SessionStarts bind a lone free identity exactly once; losers exit 0"
+PC="$TMP/proj-conc"; PCK=$(printf '%s' "$PC" | sed 's,/,-,g'); CCI="$BASE/projects/$PCK/identities"
+( unset BEAMS_CONFIG_DIR; export CLAUDE_CODE_SESSION_ID=cc-owner CLAUDE_PROJECT_DIR="$PC"; mkdir -p "$PC"
+  "$PLUGIN/lib/init.sh" "$SHARED" >/dev/null; "$PLUGIN/lib/name.sh" cc-id >/dev/null )
+rm -f "$CCI/cc-id/lease.json"          # exactly one bindable (free) identity in PC
+fire() { ( unset BEAMS_CONFIG_DIR; export CLAUDE_CODE_SESSION_ID="$1" CLAUDE_PROJECT_DIR="$PC" CLAUDE_PLUGIN_ROOT="$PLUGIN"; bash "$PLUGIN/hooks/check-on-start.sh" </dev/null >/dev/null 2>&1 ); }
+fire cc-A & pA=$!; fire cc-B & pB=$!; fire cc-C & pC=$!
+rcA=0; wait "$pA" || rcA=$?; rcB=0; wait "$pB" || rcB=$?; rcC=0; wait "$pC" || rcC=$?
+{ [ "$rcA" = 0 ] && [ "$rcB" = 0 ] && [ "$rcC" = 0 ]; } \
+  || fail "a concurrent SessionStart hook exited non-zero (bind-die crashed the hook): rcA=$rcA rcB=$rcB rcC=$rcC"
+bc=0; for s in cc-A cc-B cc-C; do [ "$(cat "$BASE/sessions/$s/bound" 2>/dev/null)" = cc-id ] && bc=$((bc + 1)); done
+[ "$bc" -eq 1 ] || fail "concurrent bind produced $bc bound pointers to cc-id (expected exactly 1 — lease lock failed)"
+pass "exactly 1 of 3 concurrent boots bound cc-id; all 3 hooks exited 0"
+
+# ── 13. auto-bind + unread must preserve check.sh's top-level systemMessage ───
+banner "13. auto-bind preserves the user-visible systemMessage when unread is waiting"
+PS="$TMP/proj-sysmsg"; PSK=$(printf '%s' "$PS" | sed 's,/,-,g'); SMI="$BASE/projects/$PSK/identities"
+( unset BEAMS_CONFIG_DIR; export CLAUDE_CODE_SESSION_ID=sm-owner CLAUDE_PROJECT_DIR="$PS"; mkdir -p "$PS"
+  "$PLUGIN/lib/init.sh" "$SHARED" >/dev/null
+  "$PLUGIN/lib/name.sh" sm-id    >/dev/null
+  "$PLUGIN/lib/join.sh" sm-beam  >/dev/null )
+run sm-send init "$SHARED" >/dev/null
+run sm-send name sm-send   >/dev/null
+run sm-send join sm-beam   >/dev/null
+run sm-send send sm-beam sm-id 'sysmsg-probe-body' >/dev/null
+rm -f "$SMI/sm-id/lease.json"          # free sm-id so the unbound boot auto-binds to it
+bout=$( unset BEAMS_CONFIG_DIR; export CLAUDE_CODE_SESSION_ID=sm-boot CLAUDE_PROJECT_DIR="$PS" CLAUDE_PLUGIN_ROOT="$PLUGIN"; bash "$PLUGIN/hooks/check-on-start.sh" </dev/null )
+printf '%s' "$bout" | jq -e '(.systemMessage // "") != ""' >/dev/null \
+  || { printf '%s' "$bout" | sed 's/^/    /'; fail "auto-bind dropped check.sh's top-level systemMessage"; }
+printf '%s' "$bout" | jq -e '.hookSpecificOutput.additionalContext | test("sysmsg-probe-body")' >/dev/null \
+  || fail "auto-bind additionalContext missing the message body"
+pass "auto-bind preserved systemMessage + folded the inbox into additionalContext"
+
 green ""
-green "round-18 PASS: durable identity + bind/rebind/migrate + lease + status + boot auto-bind + Stop delivery"
+green "round-18 PASS: durable identity + bind/rebind/migrate + lease + status + boot auto-bind + concurrent-bind lock + systemMessage + Stop delivery"
