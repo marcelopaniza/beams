@@ -4,6 +4,12 @@ All notable changes are documented here. Format follows [Keep a Changelog](https
 
 > **Lineage.** Beams is the proactive/reactive fork of [buses](https://github.com/marcelopaniza/buses) — a pure-bash cross-terminal messenger. Beams begins at **0.9.0** and inherits buses' version history below (entries at 0.8.1 and earlier were released as *buses*; the API and on-disk format are shared, the names are not — Beams uses its own `~/.config/beams` and `<shared>/beams/` namespace). The 0.9.0 entry is Beams' first release: the proactive-delivery layer that buses deliberately does not carry.
 
+## [Unreleased]
+
+### Fixed
+
+- **The background watcher no longer keeps a dead session's name reserved.** The notifier daemon polls `check.sh --notify` every 5 s, and `check.sh` refreshed the in-use lease on *every* invocation — including the daemon's. Because the daemon is detached (`nohup`+`disown`) and outlives its Claude session, an orphaned watcher kept re-stamping its now-dead session's `lease.json` forever, so the project's lone identity never went stale and **SessionStart auto-bind could never reclaim it** — every new session in that project fell back to "not initialised". The lease heartbeat now runs for interactive modes only and is skipped under `--notify`, so a live session still keeps its name across idle gaps while a dead session's lease ages out within `BEAMS_INUSE_STALE_SECONDS` (default 900s) and auto-bind takes over. New `tests/round-19.sh` (red against the pre-fix `check.sh`).
+
 ## [0.10.0] — 2026-05-31
 
 Slimmer command surface and restart-safe identity. The 22-entry slash menu collapses to 8 everyday commands + `/beams:admin`, and a session's identity is now anchored on a **name** (keyed per project) so it survives a Claude restart — with an in-use lease guarding against two live sessions sharing one name.
