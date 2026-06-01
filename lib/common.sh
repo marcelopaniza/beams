@@ -194,13 +194,14 @@ beams::config_set() {
 }
 
 beams::react_flag() {
-  # Read a boolean under .react (e.g. "watch_on_boot", "on_stop"). Echoes
-  # "true" ONLY when the flag is explicitly set to JSON true; absent, null,
-  # false, or any other value all echo "" (off). Callers test:
-  #     [ "$(beams::react_flag on_stop)" = "true" ]
-  # These flags gate the proactive hooks (SessionStart daemon autostart, Stop
-  # active-session sustain); both default off so a plain session never spawns a
-  # daemon or burns an extra turn without opting in.
+  # Read a boolean under .react (e.g. "on_stop"). Echoes "true" ONLY when the
+  # flag is explicitly JSON true; absent, null, false, or anything else echo ""
+  # (off). Callers test: [ "$(beams::react_flag on_stop)" = "true" ].
+  # NOTE: because config_get appends `// ""` and jq's `//` collapses false → "",
+  # this CANNOT express "explicitly off" — fine for an opt-IN flag like on_stop
+  # (default false), but do NOT use it to gate a DEFAULT-ON flag's opt-out.
+  # watch_on_boot now DEFAULTS TRUE (see config_init_file) and is read with a raw
+  # jq that keeps false distinct (hooks/check-on-start.sh), not via react_flag.
   [ "$(beams::config_get ".react.$1")" = "true" ] && printf 'true' || printf ''
 }
 
@@ -316,7 +317,12 @@ beams::bind_session() {
     [ "$__bind_wait" -gt 50 ] && beams::die "name '$name' is being bound by another session (stale lock? rmdir '$lock_dir')"
     sleep 0.1
   done
-  local __prev_exit_trap; __prev_exit_trap=$(trap -p EXIT)   # don't clobber a caller's EXIT trap
+  # Safety net for the beams::die / unexpected-exit paths inside the critical
+  # section; the lock is released explicitly at its end. bind_session OWNS the
+  # EXIT trap here and clears it on completion — callers must not rely on an
+  # EXIT trap surviving this call (none do). We deliberately do NOT save/restore
+  # via `eval "$(trap -p EXIT)"`: that re-eval corrupts any trap body containing
+  # a single quote.
   trap 'rmdir "$lock_dir" 2>/dev/null || true' EXIT
 
   if [ -f "$idir/config.json" ]; then
@@ -352,8 +358,7 @@ beams::bind_session() {
   beams::config_set '.session_name = $v' --arg v "$name"
   beams::lease_claim
   mkdir -p "$sdir"; printf '%s' "$key" > "$sdir/bound"
-  rmdir "$lock_dir" 2>/dev/null || true                # end of critical section
-  eval "${__prev_exit_trap:-trap - EXIT}"              # restore caller's prior EXIT trap (or clear)
+  rmdir "$lock_dir" 2>/dev/null || true; trap - EXIT   # end of critical section
 
   # Re-publish presence so peers see this session live on its subscriptions.
   local beam
