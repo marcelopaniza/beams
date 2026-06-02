@@ -10,8 +10,13 @@ set -euo pipefail
 
 PLUGIN_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 export PLUGIN_ROOT
+# Hermetic base dir for the whole run: keep each round's config / sessions /
+# TOFU known_keys out of the real ~/.config/beams. Rounds that export their own
+# XDG_CONFIG_HOME override this inside their own process.
+export XDG_CONFIG_HOME="$(mktemp -d "${TMPDIR:-/tmp}/beams-runall-xdg.XXXXXX")"
+trap 'rm -rf "$XDG_CONFIG_HOME"' EXIT
 ROUNDS=("$@")
-[ "${#ROUNDS[@]}" -eq 0 ] && ROUNDS=(1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19)
+[ "${#ROUNDS[@]}" -eq 0 ] && ROUNDS=(1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23)
 
 red()   { printf '\033[31m%s\033[0m\n' "$*"; }
 green() { printf '\033[32m%s\033[0m\n' "$*"; }

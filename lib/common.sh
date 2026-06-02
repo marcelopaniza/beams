@@ -250,11 +250,58 @@ beams::bound_name() {              # echoes the name this session is bound to, i
 beams::_now_epoch() { date -u +%s; }
 beams::lease_file() { printf '%s/lease.json' "${1:-$BEAMS_CONFIG_DIR}"; }
 
+# Hostname recorded in each lease so a reclaim can tell "the holder was on THIS
+# machine" (its liveness is checkable here) from "the holder is on another
+# machine" (only its heartbeat clock can speak for it).
+beams::_host() { hostname 2>/dev/null || printf 'unknown'; }
+
+# Is Claude session <sid> still alive ON THIS HOST? echoes: alive | dead | unknown.
+# A live Claude session exports CLAUDE_CODE_SESSION_ID=<sid> into its own (and its
+# children's) environment, so a match anywhere under /proc means alive and no
+# match means dead. Only a Linux host with a readable /proc can answer; anywhere
+# else we say 'unknown' and the caller keeps trusting the heartbeat window.
+#   TEST SEAM: BEAMS_FAKE_LIVE_SESSIONS (comma-separated) — when set, only the
+#   listed ids are 'alive' and every other id is 'dead', so the suite can drive
+#   liveness deterministically without spawning processes or needing /proc.
+beams::_session_alive_local() {
+  local sid="$1"
+  [ -n "$sid" ] || { printf 'unknown'; return 0; }
+  if [ -n "${BEAMS_FAKE_LIVE_SESSIONS:-}" ]; then
+    case ",$BEAMS_FAKE_LIVE_SESSIONS," in
+      *",$sid,"*) printf 'alive' ;;
+      *)          printf 'dead'  ;;
+    esac
+    return 0
+  fi
+  [ -d /proc ] && [ -r /proc/self/environ ] || { printf 'unknown'; return 0; }
+  # Concatenate every readable environ blob, split NUL→newline, and capture the
+  # exact id line if present. We test the captured TEXT (not the pipeline exit),
+  # and `|| true` swallows cat's failures on unreadable other-user procs — so the
+  # verdict is correct under both `set -e` and `set -o pipefail`.
+  local hit
+  hit=$( { cat /proc/[0-9]*/environ 2>/dev/null | tr '\0' '\n' \
+             | grep -Fx "CLAUDE_CODE_SESSION_ID=$sid"; } || true )
+  [ -n "$hit" ] && printf 'alive' || printf 'dead'
+}
+
+# Can we PROVE the lease holder is gone, so its name is reclaimable without
+# --force? Only when the lease was taken on THIS host AND that session no longer
+# runs here — e.g. a Claude restart left its own lease behind. A holder on another
+# machine, a host with no /proc, or a pre-host-field lease all yield 'no' (we
+# can't see those processes, so the heartbeat window still rules). echoes: yes | no.
+beams::_holder_gone() {
+  local lf="$1" lhost holder
+  lhost=$(jq -r '.host // ""'           "$lf" 2>/dev/null)
+  holder=$(jq -r '.bound_session // ""' "$lf" 2>/dev/null)
+  [ -n "$holder" ] && [ -n "$lhost" ] && [ "$lhost" = "$(beams::_host)" ] || { printf 'no'; return 0; }
+  [ "$(beams::_session_alive_local "$holder")" = dead ] && printf 'yes' || printf 'no'
+}
+
 beams::lease_claim() {             # current session takes the lease on $BEAMS_CONFIG_DIR
   local lf tmp; lf=$(beams::lease_file); tmp="${lf}.tmp.$$"
   mkdir -p "$(dirname "$lf")"
-  jq -n --arg s "$(beams::terminal_id)" --argjson t "$(beams::_now_epoch)" \
-    '{bound_session:$s, last_seen:$t}' > "$tmp" 2>/dev/null && mv "$tmp" "$lf" || rm -f "$tmp"
+  jq -n --arg s "$(beams::terminal_id)" --arg h "$(beams::_host)" --argjson t "$(beams::_now_epoch)" \
+    '{bound_session:$s, host:$h, last_seen:$t}' > "$tmp" 2>/dev/null && mv "$tmp" "$lf" || rm -f "$tmp"
 }
 
 beams::lease_refresh() {           # bump last_seen iff this session holds the lease
@@ -274,7 +321,14 @@ beams::lease_state() {             # $1 = identity dir; echoes: free | mine | bu
   [ "$holder" = "$(beams::terminal_id)" ] && { printf 'mine'; return 0; }
   seen=$(jq -r '.last_seen // 0' "$lf" 2>/dev/null)
   age=$(( $(beams::_now_epoch) - seen ))
-  [ "$age" -lt "$BEAMS_INUSE_STALE_SECONDS" ] && printf 'busy:%s' "$age" || printf 'free'
+  [ "$age" -ge "$BEAMS_INUSE_STALE_SECONDS" ] && { printf 'free'; return 0; }
+  # Inside the heartbeat window the holder still looks active — UNLESS it was
+  # this host's own session and that session is already gone (a Claude restart
+  # leaves its lease behind for up to BEAMS_INUSE_STALE_SECONDS). Then the name
+  # isn't really in use: free it so the restarted terminal reclaims it with no
+  # --force. Holders on other machines stay busy — we can't see their processes.
+  [ "$(beams::_holder_gone "$lf")" = yes ] && { printf 'free'; return 0; }
+  printf 'busy:%s' "$age"
 }
 
 beams::bind_session() {
@@ -517,17 +571,26 @@ beams::is_banned() {
 
 beams::resolve_member() {
   # $1 = beam, $2 = name-or-uuid. Echoes the canonical UUID if found, else empty.
+  #
+  # SECURITY: the returned id is used by callers to build file paths — e.g.
+  # kick.sh runs `rm -f "$members_dir/$id.json"`. A hostile shared-folder
+  # participant can plant a member record whose ".id" is a path-traversal
+  # string ("../../../../home/victim/.../config"); if we returned that, the
+  # driver's next kick would delete an arbitrary .json on the victim's box.
+  # So EVERY returned value is validated as a bare UUID before it leaves here.
   local beam="$1" who="$2"
   local mdir; mdir=$(beams::beam_members "$beam")
   [ -d "$mdir" ] || { printf ''; return 0; }
-  # Already a uuid that exists as a member?
-  if [ -f "$mdir/$who.json" ]; then printf '%s' "$who"; return 0; fi
+  local uuid_re='^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+  # Already a uuid that exists as a member? (member files are named <uuid>.json,
+  # so a non-uuid `who` could only "match" via traversal — require the uuid form.)
+  if [[ "$who" =~ $uuid_re ]] && [ -f "$mdir/$who.json" ]; then printf '%s' "$who"; return 0; fi
   while IFS= read -r f; do
     [ -f "$f" ] || continue
     local id name
     id=$(jq -r '.id // ""' "$f" 2>/dev/null)
     name=$(jq -r '.name // ""' "$f" 2>/dev/null)
-    if [ "$name" = "$who" ]; then printf '%s' "$id"; return 0; fi
+    if [ "$name" = "$who" ] && [[ "$id" =~ $uuid_re ]]; then printf '%s' "$id"; return 0; fi
   done < <(find "$mdir" -maxdepth 1 -name '*.json' -type f 2>/dev/null)
   printf ''
 }
@@ -603,26 +666,79 @@ beams::fingerprint() {
 
 # Why no beams::canonicalize() function:
 # Bash strings cannot hold NUL bytes (the shell strips them on capture).
+# ── trust-on-first-use (TOFU) pinned-key store ──────────────────────────────
+# The pubkey used to VERIFY a sender's signature must be anchored locally, not
+# trusted from the shared member record at verify time — a shared-folder
+# attacker can overwrite members/<uuid>.json with their own key (or remove it)
+# and impersonate/downgrade. So on the first successful contact with a sender
+# UUID we PIN its pubkey under the user's LOCAL base (never the shared folder);
+# later messages verify against the pin. Same-UID-shell trust tier as
+# identity.key. Keyed by UUID (one identity, one key). To re-pin after a
+# legitimate key rotation, delete the pin file (SSH known_hosts style).
+beams::known_keys_dir() { printf '%s/known_keys' "$BEAMS_BASE_DIR"; }
+
+beams::known_key_get() {
+  # $1 = sender uuid. Echoes the pinned base64 pubkey, or empty if not pinned.
+  local uuid="$1"
+  case "$uuid" in ''|*[!0-9a-f-]*) printf ''; return 0 ;; esac
+  local f; f="$(beams::known_keys_dir)/$uuid"
+  { [ -f "$f" ] && [ ! -L "$f" ]; } || { printf ''; return 0; }
+  local k; IFS= read -r k < "$f" 2>/dev/null || true
+  printf '%s' "$k"
+}
+
+beams::known_key_pin() {
+  # $1 = sender uuid, $2 = base64 pubkey. First-use only — NEVER overwrites an
+  # existing pin (a changed key must be re-pinned by deleting the file).
+  # Written via mktemp+rename so a planted symlink at the pin path can't
+  # redirect the write to a victim file.
+  local uuid="$1" pub="$2"
+  case "$uuid" in ''|*[!0-9a-f-]*) return 0 ;; esac
+  [ -n "$pub" ] || return 0
+  local dir f tmp; dir="$(beams::known_keys_dir)"; f="$dir/$uuid"
+  [ -L "$f" ] && rm -f "$f"          # never follow a planted symlink
+  [ -e "$f" ] && return 0            # already pinned
+  mkdir -p "$dir" 2>/dev/null; chmod 700 "$dir" 2>/dev/null || true
+  tmp=$(mktemp "$dir/.pin.XXXXXX" 2>/dev/null) || return 0
+  if printf '%s\n' "$pub" > "$tmp" 2>/dev/null; then
+    chmod 600 "$tmp" 2>/dev/null || true
+    mv "$tmp" "$f" 2>/dev/null || rm -f "$tmp"
+  else
+    rm -f "$tmp"
+  fi
+}
+
 # To get an unambiguous canonical that protects against ANY field value
 # (newlines, separators) shifting the parse, we write the canonical bytes
 # directly to a file with NUL separators, then hand the file to openssl.
 # The header fields are NUL-separated; the body is appended verbatim AFTER
 # a final NUL. Receiver does the identical write, so identical bytes hit
 # the verifier.
-
+#
+# `fmt` versions the signed field set so the wire format can grow without a
+# flag day: fmt 1 (legacy, the absent default) signs id,beam,from,to,ts,body;
+# fmt 2 also signs from_name (so a third party can't relabel someone's signed
+# message). A receiver verifies against the fmt the message declares — an old
+# receiver checking a fmt-2 message it doesn't understand falls to the legacy
+# canonical and simply fails closed; old fmt-1 messages keep verifying as before.
 beams::_write_canonical() {
   # $1 = destination file path
-  # $2..$6 = id beam from to ts
-  # $7 = body
+  # $2 = fmt ("1" legacy | "2")
+  # $3..$8 = id beam from from_name to ts
+  # $9 = body
   {
-    printf '%s\0' "$2" "$3" "$4" "$5" "$6"
-    printf '%s'   "$7"
+    if [ "$2" = "2" ]; then
+      printf '%s\0' "$3" "$4" "$5" "$6" "$7" "$8"   # id beam from from_name to ts
+    else
+      printf '%s\0' "$3" "$4" "$5" "$7" "$8"        # id beam from to ts (no from_name)
+    fi
+    printf '%s'   "$9"
   } > "$1"
 }
 
 beams::sign_canonical() {
-  # Sign (id, beam, from, to, ts, body); echo base64 signature, nonzero on
-  # failure. Bytes never round-trip through a bash variable.
+  # Args: <fmt> <id> <beam> <from> <from_name> <to> <ts> <body>. Echo base64
+  # signature, nonzero on failure. Bytes never round-trip through a bash var.
   command -v openssl >/dev/null 2>&1 || return 1
   [ -f "$BEAMS_IDENTITY_KEY" ]      || return 1
   local td; td=$(mktemp -d)
@@ -637,7 +753,7 @@ beams::sign_canonical() {
 
 beams::verify_canonical() {
   # $1 = base64 sig, $2 = base64 pubkey (DER).
-  # $3..$8 = id beam from to ts body
+  # $3.. = fmt id beam from from_name to ts body  (the canonical's arg list)
   # Returns 0 if signature is valid against the canonical of those fields.
   local sig_b64="$1" pubkey_b64="$2"
   shift 2
@@ -715,16 +831,29 @@ beams::msg_validate() {
     require_sig=$(jq -r '.require_signatures // false' "$manifest" 2>/dev/null)
   fi
 
-  local pubkey
-  pubkey=$(jq -r '.public_key // ""' "$members_dir/$m_from.json" 2>/dev/null)
+  local m_sig;       m_sig=$(beams::fm_field "$fm" sig)
+  local m_to;        m_to=$(beams::fm_field "$fm" to)
+  local m_fmt;       m_fmt=$(beams::fm_field "$fm" fmt); [ -n "$m_fmt" ] || m_fmt=1
+  local m_from_name; m_from_name=$(beams::fm_field "$fm" from_name)
 
-  local m_sig; m_sig=$(beams::fm_field "$fm" sig)
+  # TOFU verification. The verifying key is the LOCALLY PINNED one if we've seen
+  # this sender before; otherwise the key advertised in the (shared, attacker-
+  # writable) member record — which we PIN on the first successful verify. This
+  # is what stops a shared-folder attacker from impersonating by substituting a
+  # member's published pubkey, and from downgrading a pinned sender to unsigned.
+  local shared_pubkey pinned_pubkey
+  shared_pubkey=$(jq -r '.public_key // ""' "$members_dir/$m_from.json" 2>/dev/null)
+  pinned_pubkey=$(beams::known_key_get "$m_from")
 
-  if [ -n "$pubkey" ]; then
+  if [ -n "$pinned_pubkey" ]; then
     [ -n "$m_sig" ] || return 1
-    local m_to; m_to=$(beams::fm_field "$fm" to)
-    beams::verify_canonical "$m_sig" "$pubkey" "$m_id" "$m_beam" "$m_from" "$m_to" "$m_ts" "$body" \
-      || return 1
+    beams::verify_canonical "$m_sig" "$pinned_pubkey" \
+      "$m_fmt" "$m_id" "$m_beam" "$m_from" "$m_from_name" "$m_to" "$m_ts" "$body" || return 1
+  elif [ -n "$shared_pubkey" ]; then
+    [ -n "$m_sig" ] || return 1
+    beams::verify_canonical "$m_sig" "$shared_pubkey" \
+      "$m_fmt" "$m_id" "$m_beam" "$m_from" "$m_from_name" "$m_to" "$m_ts" "$body" || return 1
+    beams::known_key_pin "$m_from" "$shared_pubkey"   # trust on first use
   elif [ "$require_sig" = "true" ]; then
     return 1  # beam requires sigs; sender has no pubkey published → reject
   fi
@@ -778,13 +907,15 @@ beams::write_message() {
 
   beams::ensure_identity_key
   local sig
-  sig=$(beams::sign_canonical "$mid" "$beam" "$sid" "$to" "$ts_iso" "$body") || return 1
+  # fmt 2: from_name is part of the signed canonical (third-party relabel-proof).
+  sig=$(beams::sign_canonical "2" "$mid" "$beam" "$sid" "$name" "$to" "$ts_iso" "$body") || return 1
 
   local fname="${ts_compact}__${short}.msg"
   local final="$msgs_dir/$fname"
   local tmp="$msgs_dir/.$fname.tmp.$$"
   {
     printf -- '---\n'
+    printf 'fmt: %s\n'       "2"
     printf 'id: %s\n'        "$mid"
     printf 'beam: %s\n'       "$beam"
     printf 'from: %s\n'      "$sid"

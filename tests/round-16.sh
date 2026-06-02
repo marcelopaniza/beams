@@ -224,7 +224,11 @@ pass "auto-bound silently to the lone free identity"
 banner "SessionStart stays silent when the lone identity is busy (held elsewhere)"
 P_BUSY="$TMPDIR/proj-busy"
 mk_identity sid-busy held "$P_BUSY"             # lease just claimed by sid-busy → busy
+# 'sid-busy' must look alive for the lease to read busy — a gone same-host holder
+# is reclaimable now (round-20). Force it live via the test seam.
+export BEAMS_FAKE_LIVE_SESSIONS=sid-busy
 out=$(boot_unbound sid-fresh2 "$P_BUSY")
+unset BEAMS_FAKE_LIVE_SESSIONS
 [ -z "$out" ] || { echo "$out" | sed 's/^/    /'; fail "auto-bound (or prompted) for a busy identity — must never steal it"; }
 pass "silent for a busy identity (not stolen)"
 

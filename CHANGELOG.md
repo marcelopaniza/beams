@@ -4,6 +4,38 @@ All notable changes are documented here. Format follows [Keep a Changelog](https
 
 > **Lineage.** Beams is the proactive/reactive fork of [buses](https://github.com/marcelopaniza/buses) — a pure-bash cross-terminal messenger. Beams begins at **0.9.0** and inherits buses' version history below (entries at 0.8.1 and earlier were released as *buses*; the API and on-disk format are shared, the names are not — Beams uses its own `~/.config/beams` and `<shared>/beams/` namespace). The 0.9.0 entry is Beams' first release: the proactive-delivery layer that buses deliberately does not carry.
 
+## [0.10.2] — 2026-06-02
+
+Real-time wake-up that actually fans out to a fleet, restart-safe name reclaim, and a security pass that closes a shared-folder impersonation hole. Gated on a 5-reviewer pentest (4 Sonnet surfaces + Opus synthesis) before release.
+
+### Added
+
+- **Real-time channel doorbell that fans out to every session.** The watcher is now auto-armed to wake an idle session in real time, not just ping the desktop. Each session's channel server binds its **own OS-assigned port** (was a single fixed `8799`, which collided so only one session could ever be woken) and publishes it to a per-session rendezvous file `${XDG_CONFIG_HOME:-~/.config}/beams/channels/<CLAUDE_CODE_SESSION_ID>.port`; the new **`channel/on-message.sh`** hook reads it to POST each new beam to *this* session's server. `CLAUDE_CODE_SESSION_ID` is the one env var the server and watcher share, which makes the wiring automatic — no manual port assignment. New `tests/round-21.sh` (auto-port, fan-out/no-collision, explicit-port, end-to-end wake, wrong-token block, no-session-id, SIGTERM cleanup).
+- **TOFU pinned-key store.** Receivers pin a sender's Ed25519 public key on first contact under the local base (`known_keys/<uuid>`, `0600`), and from then on verify against the pin — see Security. `beams::known_keys_dir` / `known_key_get` / `known_key_pin`. New `tests/round-23.sh`.
+- **Dead-holder lease reclaim** (`beams::_holder_gone` + a `host` field on the lease). A restarted terminal reclaims its **own** name with no `--force` when the prior holder was a now-gone session on this host; holders that are still alive, on another machine, or recorded by a pre-host-field (legacy) lease stay protected. New `tests/round-20.sh`; `round-16`/`round-18` gained the `BEAMS_FAKE_LIVE_SESSIONS` test seam.
+- **`tests/round-22.sh`** — security regressions for the fixes below (kick traversal, watcher-pid guards, cursor poisoning, the FIFO hang).
+
+### Changed
+
+- **SessionStart auto-arms the doorbell, not just notifications.** When a session is launched with a channel token (`BEAMS_CHANNEL_TOKEN`/`_FILE`, or `BEAMS_CHANNEL_AUTOWIRE=1`) and `curl` is present, the boot hook starts the watcher with `--on-message` already pointed at `channel/on-message.sh`; otherwise it stays notify-only as before. `channel/beams-channel.mjs` defaults to an OS-assigned port (set `BEAMS_CHANNEL_PORT` to pin one), and removes its rendezvous file on exit. `channel/README.md` + `.mcp.json.example` updated (user-level absolute-path registration, automatic port).
+- **Message verification is now TOFU-anchored.** `beams::msg_validate` verifies a signature against the **locally pinned** key when the sender is known, falling back to the shared member record only on first contact (and pinning it then). The signed canonical is versioned by a new `fmt` field — `fmt: 2` (what 0.10.2 senders write) additionally signs `from_name`; absent/`1` keeps the legacy field set, so old↔new peers still verify.
+
+### Fixed
+
+- **`/beams:admin kick` could delete an arbitrary `.json` on the driver's machine.** `beams::resolve_member` returned the raw `.id` from an attacker-writable member record, which `kick` fed into `rm -f "$members_dir/$id.json"`; a planted record with a path-traversal `.id` escaped the members dir. `resolve_member` now only ever returns a bare UUID.
+- **A poisoned `watcher.pid` could signal every process you own.** `kill -0 -1` succeeds, so a pid file containing `-1` made `is_alive` true and `/beams:watch stop` escalate to `kill -TERM/-KILL -1`. The pid is now validated as a positive integer before any `kill`.
+- **The watcher wrote its pid through a planted symlink.** `echo $$ > watcher.pid` followed a same-UID-planted symlink and could overwrite a victim file; the write is now `mktemp` + atomic `mv` (rename replaces the link, never follows it). `watcher.log` rotation gained the same `! -L` symlink guard `on-message.log` already had.
+- **Cursor poisoning → permanent denial of delivery.** A planted far-future-dated `.msg` was picked as the "latest" by `ls -1t`, pushing the cursor's mtime into the future so every real message looked older and was never delivered. The cursor is now clamped to "now".
+- **`channel/on-message.sh` could hang on a swapped port file** (FIFO) and silently no-op on a no-trailing-newline read. Now guarded to a regular file with a bounded read.
+- **U+2028/U+2029** are stripped by the channel content sanitizer (they survive `JSON.stringify` as raw bytes and could split the MCP stdout framing). `on_message_safe` re-enables once a symlinked log is removed.
+
+### Security
+
+- **Pre-release pentest — 4 Sonnet reviewers across the channel server, the delivery daemons, the hooks/prompt-injection surface, and the identity/lease/signature core, plus Opus synthesis and adversarial verification.** Findings above were fixed; the headline:
+  - **CRITICAL — shared-folder impersonation via pubkey substitution (closed).** `msg_validate` used to read the verifying public key straight from the shared, attacker-writable member record, so anyone who could write the share could overwrite a victim's `members/<uuid>.json` — substitute their own key (impersonate) or drop it (downgrade to unsigned) — and speak as the victim. **TOFU key pinning** closes this: once a sender is pinned, a substituted or removed shared key is ignored and a valid signature is always required. Residual: the first-contact window (SSH `known_hosts` model). SECURITY.md's impersonation claim was corrected to match.
+  - **`from_name` relabeling (closed for 0.10.2↔0.10.2).** `fmt: 2` brings `from_name` under the signature, so a third party can no longer relabel someone's signed message. A *sender* still chooses its own display name; the authoritative identity remains the signed `from` UUID.
+- **Consciously deferred (documented, not rushed):** replay-by-touch stays a roadmap item (sequence numbers, as in SECURITY.md — a re-touched signed message can still re-deliver); the `transfer-driver --force` cooperative guard is unchanged (a hostile share-writer bypasses it entirely by editing `manifest.json` directly, so driver takeover remains cooperative/out-of-scope); the per-pull message-count flood is fail-open (a naive cap would risk dropping real messages); the `/proc` liveness "squatter" only ever over-protects a name (it cannot make a live holder look dead, so it cannot steal one).
+
 ## [0.10.1] — 2026-06-01
 
 ### Fixed

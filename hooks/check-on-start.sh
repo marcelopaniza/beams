@@ -78,12 +78,13 @@ cat >/dev/null 2>&1 || true
   # daemon we may start next won't re-notify messages we just surfaced at boot.
   out=$("$root/lib/check.sh" --hook SessionStart 2>/dev/null) || out=""
 
-  # Default-on: bring up the notifier daemon on boot so every session has the
-  # real-time doorbell. Opt out per-session with react.watch_on_boot:false, or
-  # globally with BEAMS_DISABLE_WATCH_ON_BOOT=1 (headless/CI/tests). Idempotent
-  # (watch.sh no-ops when one is already running), detached, and fully silenced
-  # so its "watcher started" line never leaks into the session context. Pin
-  # BEAMS_CONFIG_DIR so the daemon resolves the exact same identity this hook did.
+  # Default-on: bring up the notifier daemon on boot so every session gets
+  # desktop notifications for new beams. Opt out per-session with
+  # react.watch_on_boot:false, or globally with BEAMS_DISABLE_WATCH_ON_BOOT=1
+  # (headless/CI/tests). Idempotent (watch.sh no-ops when one is already
+  # running), detached, and fully silenced so its "watcher started" line never
+  # leaks into the session context. Pin BEAMS_CONFIG_DIR so the daemon resolves
+  # the exact same identity this hook did.
   # Read the raw value, NOT beams::config_get — config_get appends `// ""`, and
   # jq's `//` treats JSON false as empty, so an explicit watch_on_boot:false
   # would collapse to "" and the `!= "false"` test would WRONGLY arm. Plain jq
@@ -92,7 +93,22 @@ cat >/dev/null 2>&1 || true
   __wob=$(jq -r '.react.watch_on_boot' "$BEAMS_CONFIG_FILE" 2>/dev/null)
   if [ "${BEAMS_DISABLE_WATCH_ON_BOOT:-}" != "1" ] && [ "$__wob" != "false" ]; then
     export BEAMS_CONFIG_DIR
-    nohup bash "$root/lib/watch.sh" start >/dev/null 2>&1 </dev/null &
+    # Real-time doorbell: when this session was launched with the channel (a
+    # channel token is present, or BEAMS_CHANNEL_AUTOWIRE=1 for a token-less/dev
+    # setup) AND curl is available, arm the watcher's --on-message hook too, so a
+    # new beam WAKES this idle session via a <channel> event instead of only
+    # pinging the desktop. The hook (channel/on-message.sh) finds this session's
+    # channel-server port from the per-session rendezvous file the server
+    # publishes. No channel → the plain notify-only watcher, exactly as before.
+    if { [ -n "${BEAMS_CHANNEL_TOKEN:-}" ] || [ -n "${BEAMS_CHANNEL_TOKEN_FILE:-}" ] || [ "${BEAMS_CHANNEL_AUTOWIRE:-}" = "1" ]; } \
+       && command -v curl >/dev/null 2>&1; then
+      export BEAMS_CHANNEL_TOKEN BEAMS_CHANNEL_TOKEN_FILE
+      nohup bash "$root/lib/watch.sh" start \
+        --on-message "bash $(printf '%q' "$root/channel/on-message.sh")" \
+        >/dev/null 2>&1 </dev/null &
+    else
+      nohup bash "$root/lib/watch.sh" start >/dev/null 2>&1 </dev/null &
+    fi
     disown 2>/dev/null || true
   fi
 

@@ -4,6 +4,7 @@ set -euo pipefail
 
 PLUGIN="${PLUGIN_ROOT:-$(cd "$(dirname "$0")/.." && pwd)}"
 TMPDIR=$(mktemp -d /tmp/beams-test7.XXXXXX)
+export XDG_CONFIG_HOME="$TMPDIR/xdg"   # keep TOFU known_keys hermetic on direct runs
 SHARED="$TMPDIR/share"
 CFG_A="$TMPDIR/cfg-a"
 CFG_B="$TMPDIR/cfg-b"

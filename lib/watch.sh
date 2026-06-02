@@ -93,7 +93,13 @@ PLUGIN_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 is_alive() {
   [ -f "$pid_file" ] || return 1
   local p; p=$(cat "$pid_file" 2>/dev/null || echo "")
-  [ -n "$p" ] && kill -0 "$p" 2>/dev/null
+  # SECURITY: the pid file sits in a same-UID-writable dir; a hostile peer could
+  # plant "-1" (or "0"), and `kill -0 -1` SUCCEEDS — cmd_stop would then
+  # `kill -TERM/-KILL -1` and signal EVERY process this user owns. Accept only a
+  # bare positive integer.
+  case "$p" in ''|*[!0-9]*) return 1 ;; esac
+  [ "$p" -ge 1 ] 2>/dev/null || return 1
+  kill -0 "$p" 2>/dev/null
 }
 
 cmd_start() {
@@ -171,6 +177,10 @@ cmd_stop() {
     return 0
   fi
   local p; p=$(cat "$pid_file")
+  # Re-validate after the is_alive check (a peer could have rewritten the file
+  # in between) — never let "-1"/"0" reach kill. See is_alive.
+  case "$p" in ''|*[!0-9]*) rm -f "$pid_file"; printf 'beams: watcher pid file was malformed — cleared\n'; return 0 ;; esac
+  [ "$p" -ge 1 ] 2>/dev/null || { rm -f "$pid_file"; printf 'beams: watcher pid file was malformed — cleared\n'; return 0; }
   kill -TERM "$p" 2>/dev/null || true
   # Give it a moment to clean up.
   for _ in 1 2 3 4 5 6 7 8 9 10; do

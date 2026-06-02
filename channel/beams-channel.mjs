@@ -22,9 +22,12 @@
 //   ALL diagnostics, warnings, and info messages go to stderr via log().
 //
 // ENVIRONMENT VARIABLES
-//   BEAMS_CHANNEL_PORT        HTTP port to listen on (default 8799).  Must be
-//                             a positive integer; invalid values fall back to
-//                             8799.
+//   BEAMS_CHANNEL_PORT        HTTP port to listen on.  If unset (the default),
+//                             the OS assigns a free ephemeral port so several
+//                             concurrent sessions never collide on one port;
+//                             the actual port is published to a per-session
+//                             rendezvous file (see RENDEZVOUS FILE below).  Set
+//                             a positive integer to pin a fixed port instead.
 //
 //   BEAMS_CHANNEL_TOKEN       Shared secret for the x-beams-token request
 //                             header.  If neither TOKEN nor TOKEN_FILE is set,
@@ -44,11 +47,20 @@
 //   because community-marketplace plugins are not on the allowlist.
 //   Anthropic auth (claude.ai or Console API key) is required; Bedrock,
 //   Vertex, and Foundry are not supported.  The protocol contract may change.
+//
+// RENDEZVOUS FILE
+//   The watcher daemon and this server are separate processes in the SAME
+//   Claude session that never talk directly.  They DO share one env var,
+//   CLAUDE_CODE_SESSION_ID, so after binding the server writes its real port to
+//   ${XDG_CONFIG_HOME:-~/.config}/beams/channels/<session-id>.port and the
+//   watcher's --on-message hook reads it back to know where to POST.  The file
+//   is removed on exit.  Skipped when no session id is set.
 
 import { createServer }  from 'node:http';
-import { writeFileSync, readFileSync, existsSync } from 'node:fs';
+import { writeFileSync, readFileSync, existsSync, mkdirSync, unlinkSync } from 'node:fs';
 import { randomBytes, timingSafeEqual } from 'node:crypto';
 import { createInterface } from 'node:readline';
+import { join, dirname }   from 'node:path';
 import process             from 'node:process';
 
 // ---------------------------------------------------------------------------
@@ -158,9 +170,52 @@ function resolvePort() {
     if (Number.isInteger(n) && n > 0 && n <= 65535) {
       return n;
     }
-    log(`WARNING: BEAMS_CHANNEL_PORT="${raw}" is not a valid port; using default 8799`);
+    log(`WARNING: BEAMS_CHANNEL_PORT="${raw}" is not a valid port; using an OS-assigned port`);
   }
-  return 8799;
+  // Unset/empty/invalid → 0 tells the OS to pick a free ephemeral port. This is
+  // what lets every concurrent Claude session run its own channel server with
+  // no 8799 collision; the real port is published via writePortFile() so the
+  // watcher's --on-message hook can find it.
+  return 0;
+}
+
+// ---------------------------------------------------------------------------
+// Per-session rendezvous file — publishes the actual bound HTTP port so the
+// watcher (a separate process in the same session) knows where to POST. Keyed
+// by CLAUDE_CODE_SESSION_ID, the one env var the server and watcher share. The
+// port is not secret (the token guards POSTs); the 0700 dir / 0600 file is just
+// tidiness. No session id (e.g. the smoke test, or a manual run) → no file, so
+// those paths keep working unchanged.
+// ---------------------------------------------------------------------------
+
+let _portFile = null; // remembered so we can unlink it on exit
+
+function portFilePath() {
+  const sid = (process.env.CLAUDE_CODE_SESSION_ID || '').replace(/[^A-Za-z0-9_-]/g, '');
+  if (!sid) return null; // defused to identifier chars; empty → nothing to publish
+  const base = process.env.XDG_CONFIG_HOME ||
+    (process.env.HOME ? join(process.env.HOME, '.config') : '');
+  if (!base) return null;
+  return join(base, 'beams', 'channels', `${sid}.port`);
+}
+
+function writePortFile(actualPort) {
+  const p = portFilePath();
+  if (!p) return;
+  try {
+    mkdirSync(dirname(p), { recursive: true, mode: 0o700 });
+    writeFileSync(p, String(actualPort), { mode: 0o600, flag: 'w' });
+    _portFile = p;
+    log(`published HTTP port ${actualPort} to ${p}`);
+  } catch (err) {
+    log(`WARNING: could not write rendezvous port file ${p}: ${err.message}`);
+  }
+}
+
+function removePortFile() {
+  if (!_portFile) return;
+  try { unlinkSync(_portFile); } catch (_e) { /* already gone — fine */ }
+  _portFile = null;
 }
 
 // ---------------------------------------------------------------------------
@@ -174,9 +229,12 @@ function resolvePort() {
 // ---------------------------------------------------------------------------
 
 function sanitizeContent(str) {
-  // Remove U+0000–U+001F, U+007F, U+0080–U+009F, and < >
+  // Remove U+0000–U+001F, U+007F, U+0080–U+009F, U+2028/U+2029, and < >.
+  // U+2028/U+2029 are ECMAScript line terminators that JSON.stringify emits as
+  // RAW bytes (Node does not escape them), so an unstripped one could split this
+  // server's newline-delimited JSON-RPC framing on a spec-compliant MCP reader.
   // eslint-disable-next-line no-control-regex
-  return str.replace(/[\x00-\x1f\x7f\x80-\x9f<>]/g, '');
+  return str.replace(/[\x00-\x1f\x7f\x80-\x9f\u2028\u2029<>]/g, '');
 }
 
 // Sanitize a meta key or value to identifier-safe characters only.
@@ -396,7 +454,10 @@ function startHttpServer(port) {
   server.maxConnections = 32;    // a localhost doorbell needs very few
 
   server.listen(port, '127.0.0.1', () => {
-    log(`HTTP listener ready on 127.0.0.1:${port}`);
+    // `port` may be 0 (OS-assigned); read the real one back off the socket.
+    const actualPort = server.address().port;
+    log(`HTTP listener ready on 127.0.0.1:${actualPort}`);
+    writePortFile(actualPort);
   });
 
   server.on('error', (err) => {
@@ -415,8 +476,12 @@ function startHttpServer(port) {
 // Lifecycle — graceful shutdown on SIGTERM/SIGINT, log uncaught exceptions.
 // ---------------------------------------------------------------------------
 
-process.on('SIGTERM', () => { log('SIGTERM received, exiting'); process.exit(0); });
-process.on('SIGINT',  () => { log('SIGINT received, exiting');  process.exit(0); });
+process.on('SIGTERM', () => { log('SIGTERM received, exiting'); removePortFile(); process.exit(0); });
+process.on('SIGINT',  () => { log('SIGINT received, exiting');  removePortFile(); process.exit(0); });
+// Backstop: also unlink the rendezvous file on any normal exit (e.g. stdin
+// closed because Claude Code quit). 'exit' handlers must be synchronous, which
+// removePortFile (unlinkSync) is.
+process.on('exit', removePortFile);
 
 process.on('uncaughtException', (err) => {
   log(`uncaughtException: ${err.stack || err.message}`);
@@ -437,4 +502,4 @@ const PORT = resolvePort();
 startStdinReader();
 startHttpServer(PORT);
 
-log(`beams-channel ready (MCP/stdio + HTTP :${PORT}) — experimental, opt-in`);
+log(`beams-channel starting (MCP/stdio + HTTP) — experimental, opt-in`); // bound port is logged by the HTTP listener once it's up

@@ -58,6 +58,10 @@ printf '%s' "$out" | grep -q 'session_name: loop' || fail "status didn't resolve
 pass "bound session resolves to the durable identity"
 
 banner "4. lease: a different live session is refused without --force"
+# The holder (sess-1) must look alive for the busy gate to engage — a lease whose
+# holder is a gone same-host session is now reclaimable (round-20). Force sess-1
+# 'live' via the test seam so this exercises live-session protection.
+export BEAMS_FAKE_LIVE_SESSIONS=sess-1
 if run sess-2 name loop >/tmp/r18-s2.out 2>&1; then
   fail "S2 bound 'loop' while S1 holds a fresh lease (expected refusal)"
 fi
@@ -71,6 +75,7 @@ UUID2=$(jq -r '.session_id' "$IDENT/loop/config.json")
 [ "$UUID2" = "$UUID1" ] || fail "rebind changed the UUID ($UUID1 -> $UUID2)"
 [ "$(jq -r '.bound_session' "$IDENT/loop/lease.json")" = sess-2 ] || fail "lease holder not moved to sess-2"
 pass "forced takeover rebinds same identity (uuid stable), lease moves to S2"
+unset BEAMS_FAKE_LIVE_SESSIONS
 
 banner "6. a stale lease frees the name without --force"
 export BEAMS_INUSE_STALE_SECONDS=0
@@ -103,6 +108,9 @@ pass "status reports bound=loop, in use=yes"
 banner "10. SessionStart auto-binds an unbound session to a lone FREE identity; never asks"
 # 'loop' (held by sess-3) and 'game2' (held by sess-4) both hold fresh leases →
 # an unbound session must NOT bind to a busy name and must NOT prompt: silent.
+# Their holders must look alive for "busy" to hold (a gone same-host holder is
+# reclaimable now — round-20); force both live via the test seam.
+export BEAMS_FAKE_LIVE_SESSIONS=sess-3,sess-4
 bout=$(boot boot-sess)
 [ -z "$bout" ] || fail "boot hook spoke while every identity was busy (must stay silent, never steal): $bout"
 # Free exactly one identity (its holder went away) → now exactly one bindable,
@@ -114,6 +122,7 @@ printf '%s' "$bout" | jq -e '.hookSpecificOutput.additionalContext | test("auto-
 [ "$(cat "$BASE/sessions/boot-sess2/bound" 2>/dev/null)" = loop ] \
   || fail "auto-bind didn't write boot-sess2's bound pointer"
 pass "SessionStart auto-binds to a lone free identity; silent when busy or ambiguous"
+unset BEAMS_FAKE_LIVE_SESSIONS
 
 banner "11. Stop hook delivers to a bound, opted-in session (proactive, no new prompt)"
 run sess-3 join general >/dev/null                       # sess-3 is bound to 'loop'
@@ -136,6 +145,11 @@ PC="$TMP/proj-conc"; PCK=$(printf '%s' "$PC" | sed 's,/,-,g'); CCI="$BASE/projec
 ( unset BEAMS_CONFIG_DIR; export CLAUDE_CODE_SESSION_ID=cc-owner CLAUDE_PROJECT_DIR="$PC"; mkdir -p "$PC"
   "$PLUGIN/lib/init.sh" "$SHARED" >/dev/null; "$PLUGIN/lib/name.sh" cc-id >/dev/null )
 rm -f "$CCI/cc-id/lease.json"          # exactly one bindable (free) identity in PC
+# The 3 racers must look alive so the WINNER's fresh lease reads busy to the
+# losers — otherwise each ephemeral boot session dies instantly and the
+# dead-holder reclaim (round-20) would let all 3 bind. The bindlock + this seam
+# make the "exactly one winner" outcome deterministic.
+export BEAMS_FAKE_LIVE_SESSIONS=cc-A,cc-B,cc-C
 fire() { ( unset BEAMS_CONFIG_DIR; export CLAUDE_CODE_SESSION_ID="$1" CLAUDE_PROJECT_DIR="$PC" CLAUDE_PLUGIN_ROOT="$PLUGIN"; bash "$PLUGIN/hooks/check-on-start.sh" </dev/null >/dev/null 2>&1 ); }
 fire cc-A & pA=$!; fire cc-B & pB=$!; fire cc-C & pC=$!
 rcA=0; wait "$pA" || rcA=$?; rcB=0; wait "$pB" || rcB=$?; rcC=0; wait "$pC" || rcC=$?
@@ -144,6 +158,7 @@ rcA=0; wait "$pA" || rcA=$?; rcB=0; wait "$pB" || rcB=$?; rcC=0; wait "$pC" || r
 bc=0; for s in cc-A cc-B cc-C; do [ "$(cat "$BASE/sessions/$s/bound" 2>/dev/null)" = cc-id ] && bc=$((bc + 1)); done
 [ "$bc" -eq 1 ] || fail "concurrent bind produced $bc bound pointers to cc-id (expected exactly 1 — lease lock failed)"
 pass "exactly 1 of 3 concurrent boots bound cc-id; all 3 hooks exited 0"
+unset BEAMS_FAKE_LIVE_SESSIONS
 
 # ── 13. auto-bind + unread must preserve check.sh's top-level systemMessage ───
 banner "13. auto-bind preserves the user-visible systemMessage when unread is waiting"

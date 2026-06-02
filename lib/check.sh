@@ -175,15 +175,24 @@ advance_cursors_for_beam() {
   # script-wide `set -o pipefail` that makes the pipeline exit 141 and `set -e`
   # aborts the whole read (no output). Scope pipefail off so the early close is fine.
   latest=$(set +o pipefail; ls -1t "$mdir"/*.msg 2>/dev/null | head -n 1)
+  # SECURITY: a hostile peer can plant a .msg with a FAR-FUTURE mtime; `ls -1t`
+  # would pick it as "latest" and `touch -r` would push the cursor's mtime into
+  # the future — after which every legitimately-dated message looks "older than
+  # cursor" to `find -newer` and is NEVER delivered (permanent denial of
+  # delivery). nowref is a freshly-stamped marker; if a cursor ends up newer
+  # than it, the cursor is in the future, so we clamp it back to now.
+  local nowref; nowref=$(mktemp 2>/dev/null || echo "")
   for cursor in "$@"; do
     [ "$cursor" = "$beam" ] && continue
+    : > "$cursor"
     if [ -n "$latest" ]; then
-      : > "$cursor"
       touch -r "$latest" "$cursor"
-    else
-      : > "$cursor"
+      if [ -n "$nowref" ] && [ -n "$(find "$cursor" -newer "$nowref" 2>/dev/null)" ]; then
+        touch "$cursor"   # cursor landed in the future → clamp to now
+      fi
     fi
   done
+  [ -n "$nowref" ] && rm -f "$nowref"
 }
 
 case "$mode" in

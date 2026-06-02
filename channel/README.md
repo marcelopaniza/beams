@@ -100,17 +100,26 @@ does not disable org policy (`channelsEnabled`), and it does not affect other
 `--channels` entries.  The server itself is localhost-only; no external
 network exposure is involved.
 
-### 4. Wire the watcher to the channel
+### 4. Wire the watcher to the channel — automatic
 
-Start the watcher with an `--on-message` hook that POSTs each new message to
-the channel server.  Run this inside your Claude Code session (or in a shell
-that has `BEAMS_CHANNEL_TOKEN` set):
+You don't have to do anything here.  When a session is launched with a channel
+token set (step 2), the beams **SessionStart hook starts the watcher with its
+`--on-message` hook already pointed at the channel** — no manual
+`/beams:watch start --on-message ...`.  The hook it installs is
+`channel/on-message.sh`, which POSTs each new message to *this session's*
+channel server.
+
+It finds the right server on its own.  Each session's server binds its **own
+OS-assigned port** (no more fixed 8799, so any number of sessions coexist) and
+publishes that port to a per-session rendezvous file:
 
 ```
-/beams:watch start --on-message 'curl -s -m 5 -X POST -H "x-beams-token: $BEAMS_CHANNEL_TOKEN" -H "x-beams-beam: $BEAMS_BEAM" -H "x-beams-from: $BEAMS_FROM" --data-binary "$BEAMS_PREVIEW" http://127.0.0.1:${BEAMS_CHANNEL_PORT:-8799}/ >/dev/null 2>&1 || true'
+${XDG_CONFIG_HOME:-~/.config}/beams/channels/<CLAUDE_CODE_SESSION_ID>.port
 ```
 
-The watcher exports three variables per message before running `--on-message`:
+`on-message.sh` reads that file to learn where to POST, and resolves the token
+from `BEAMS_CHANNEL_TOKEN` (or `BEAMS_CHANNEL_TOKEN_FILE`).  The watcher exports
+three variables per message that the hook forwards:
 
 | Variable | Contents |
 |---|---|
@@ -118,13 +127,17 @@ The watcher exports three variables per message before running `--on-message`:
 | `BEAMS_FROM` | Sender's friendly name |
 | `BEAMS_PREVIEW` | First 120 chars of the message body |
 
-`BEAMS_CHANNEL_TOKEN` is inherited from the shell that launched the watcher
-(same shell where you ran `export BEAMS_CHANNEL_TOKEN=...` in step 2).
-`BEAMS_CHANNEL_PORT` defaults to 8799 if unset; the `${:-8799}` expansion
-in the curl command matches.
+**Token-less / dev setups.**  If you run the server without a token, set
+`BEAMS_CHANNEL_AUTOWIRE=1` before launching `claude` — otherwise the hook can't
+tell the channel is in use (a present token is its signal) and leaves the
+watcher notify-only.
 
-The `|| true` at the end prevents the watcher daemon from treating a failed
-curl (e.g. server not yet up) as an error.
+**Manual / advanced.**  To wire it yourself (custom watcher, fixed port), pass
+the installed hook as your `--on-message`:
+
+```
+/beams:watch start --on-message 'bash /absolute/path/to/channel/on-message.sh'
+```
 
 ## Security
 
@@ -153,11 +166,16 @@ controlled only if the beams layer is already compromised.
 
 ## Verify it works
 
-After launching Claude Code with the development flag, in a separate terminal:
+After launching Claude Code with the development flag, in a separate terminal.
+The server's port is OS-assigned, so read it from the rendezvous file first
+(one `.port` file per open session):
 
 ```bash
+# Find your session's port (list the dir if you have more than one session)
+PORT=$(cat "${XDG_CONFIG_HOME:-$HOME/.config}"/beams/channels/*.port | head -1)
+
 # Health check — should print "ok"
-curl -s http://127.0.0.1:8799/health
+curl -s "http://127.0.0.1:$PORT/health"
 
 # Send a test event — Claude should wake and surface the message
 curl -X POST \
@@ -165,14 +183,16 @@ curl -X POST \
   -H "x-beams-beam: test" \
   -H "x-beams-from: smoke" \
   --data-binary "hello from the channel smoke test" \
-  http://127.0.0.1:8799/
+  "http://127.0.0.1:$PORT/"
 ```
 
 Watch your Claude Code terminal — it should show a `<channel source="beams"
 beam="test" from="smoke">` event and Claude will surface the message.
 
-To change the port, set `BEAMS_CHANNEL_PORT` before launching `claude` (the
-spawned server inherits it):
+By default the server takes an OS-assigned free port per session (published to
+the rendezvous file above), so several sessions never collide.  To **pin** a
+fixed port instead, set `BEAMS_CHANNEL_PORT` before launching `claude` (the
+spawned server inherits it) — but then only one session can use that port:
 
 ```bash
 export BEAMS_CHANNEL_PORT=9100

@@ -1,15 +1,19 @@
 {
   "_comment": [
     "This is an EXAMPLE — copy to .mcp.json (project-level) or merge the",
-    "'beams' entry into ~/.claude.json (user-level).  For user-level config",
-    "replace './channel/beams-channel.mjs' with the absolute path to that",
-    "file, e.g. '/home/you/projects/beams/channel/beams-channel.mjs'.",
+    "'beams' entry into ~/.claude.json (user-level).  Register it USER-LEVEL",
+    "with an ABSOLUTE path if you want the doorbell from any working directory",
+    "(e.g. several projects' sessions), replacing './channel/beams-channel.mjs'",
+    "with e.g. '/home/you/projects/beams/channel/beams-channel.mjs'.",
     "",
     "After registering, launch with the development flag (required for any",
     "community plugin not yet on Anthropic's channel allowlist):",
     "  claude --dangerously-load-development-channels server:beams",
     "",
-    "See channel/README.md for the full setup and watcher wiring steps."
+    "No port to configure: each session's server takes its own OS-assigned",
+    "port automatically, and the watcher is auto-armed to find it (set a channel",
+    "token first — see channel/README.md step 2).  Set BEAMS_CHANNEL_PORT only",
+    "to pin a fixed port.  See channel/README.md for the full setup."
   ],
   "mcpServers": {
     "beams": {

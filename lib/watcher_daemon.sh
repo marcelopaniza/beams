@@ -44,7 +44,16 @@ mkdir -p "$state_dir"
 # Path to our own log file, used for in-process rotation in the loop below.
 # Defined here so the loop can reference it without recomputing each pass.
 pid_file="$state_dir/watcher.pid"
-echo $$ > "$pid_file"
+# SECURITY: write the pid via mktemp + atomic rename, never a bare
+# `echo $$ > "$pid_file"`. A same-UID peer could pre-plant watcher.pid as a
+# SYMLINK to a victim file (e.g. ~/.ssh/authorized_keys); a bare redirect would
+# follow it and overwrite the target with our PID. rename(2) replaces the
+# symlink name itself, atomically, without following it.
+{
+  __pid_tmp=$(mktemp "$state_dir/.watcher.pid.XXXXXX" 2>/dev/null) \
+    && printf '%s\n' "$$" > "$__pid_tmp" \
+    && mv -f "$__pid_tmp" "$pid_file"
+} || { echo "watcher: cannot write pid file safely — exiting" >&2; exit 1; }
 
 cleanup() {
   rm -f "$pid_file"
@@ -113,11 +122,12 @@ on_message_safe=1
 on_message_check_symlink() {
   if [ -L "$on_message_log" ]; then
     if [ "$on_message_safe" = 1 ]; then
-      echo "[$(beams::now_iso)] WARN: on-message.log is a symlink — refusing to follow; on-message dispatch DISABLED this run"
+      echo "[$(beams::now_iso)] WARN: on-message.log is a symlink — refusing to follow; on-message dispatch DISABLED until it is removed"
     fi
     on_message_safe=0
     return 1
   fi
+  on_message_safe=1   # symlink gone (or never present) → dispatch re-enabled
   return 0
 }
 on_message_check_symlink || true
@@ -230,7 +240,11 @@ while true; do
   # bounds total run time. Done from inside the loop so they track the logs
   # we're already writing to, no matter where they live.
   log_self="${state_dir}/watcher.log"
-  if [ -f "$log_self" ] && [ "$(wc -c < "$log_self" 2>/dev/null || echo 0)" -gt 1048576 ]; then
+  # Refuse to truncate through a symlink — same hardening as on-message.log
+  # below. Without the `! -L` guard a same-UID peer could point watcher.log at a
+  # victim file and let the 1MB rotation `: >` zero it out.
+  if [ -f "$log_self" ] && [ ! -L "$log_self" ] && \
+     [ "$(wc -c < "$log_self" 2>/dev/null || echo 0)" -gt 1048576 ]; then
     : > "$log_self"
     echo "[$(beams::now_iso)] watcher.log rotated (exceeded 1MB)"
   fi
