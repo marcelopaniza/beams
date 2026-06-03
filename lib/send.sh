@@ -69,7 +69,19 @@ body="$*"
 [ -n "$body" ] || beams::die "empty message body"
 
 beams::valid_name "$beam" || beams::die "invalid beam name: $beam"
-beams::beam_exists "$beam" || beams::die "beam '$beam' does not exist on the shared folder"
+if ! beams::beam_exists "$beam"; then
+  # Common mix-up: `send <name>` where <name> is a PEER (a session), not a beam.
+  # You DM a peer by sending on a beam you BOTH share, with them as <to>.
+  pb=$(beams::peer_beams "$beam" | LC_ALL=C sort)
+  if [ -n "$pb" ]; then
+    first=$(printf '%s\n' "$pb" | head -1)
+    list=$(printf '%s\n' "$pb" | head -3 | paste -sd ', ' -)
+    beams::die "beam '$beam' does not exist — but a session named '$beam' is on beam(s): $list.
+  to message that session, send on a beam you share, with them as the recipient:
+    /beams:send $first $beam <your message>"
+  fi
+  beams::die "beam '$beam' does not exist on the shared folder"
+fi
 
 # Banlist gate: refuse if our session has been kicked from this beam.
 if beams::is_banned "$beam"; then

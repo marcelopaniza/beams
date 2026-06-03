@@ -211,6 +211,18 @@ beams::config_require() {
     beams::err "       → keep using the legacy shared identity"
     exit 1
   fi
+  # If THIS project has no identity but the machine already uses beams elsewhere,
+  # the user almost certainly just needs to set this project up with the same
+  # shared folder — surface it + the exact commands instead of a dead end.
+  local known; known=$(beams::any_known_shared_path 2>/dev/null)
+  if [ -n "$known" ]; then
+    beams::err "not initialised for this project yet (no identity here)."
+    beams::err "  your other beams identities use shared folder: $known"
+    beams::err "  set this project up to match, then pick a name:"
+    beams::err "    /beams:init $known"
+    beams::err "    /beams:name <you>"
+    exit 1
+  fi
   beams::die "not initialised — run /beams:start first"
 }
 
@@ -273,6 +285,19 @@ beams::project_shared_path() {     # inherit the shared folder from any sibling 
     jq -r '.shared_path // empty' "$f" 2>/dev/null
     return 0
   done
+}
+
+beams::any_known_shared_path() {   # a shared_path from ANY identity on this machine, or empty
+  # Turns a bare "not initialised" in a fresh project into an actionable hint:
+  # the user almost certainly wants the same shared folder they already use
+  # elsewhere. Scans every project's identities; first hit wins.
+  local f sp
+  for f in "$BEAMS_BASE_DIR"/projects/*/identities/*/config.json; do
+    [ -f "$f" ] || continue
+    sp=$(jq -r '.shared_path // empty' "$f" 2>/dev/null)
+    if [ -n "$sp" ]; then printf '%s' "$sp"; return 0; fi
+  done
+  return 0
 }
 
 beams::bound_name() {              # echoes the name this session is bound to, if any
@@ -1093,4 +1118,24 @@ beams::write_member_record() {
     --arg pub "$pub" \
     '{id: $id, name: $name, host: $host, last_seen: $seen, public_key: $pub}' > "$tmp"
   mv "$tmp" "$members_dir/$sid.json"
+}
+
+beams::peer_beams() {              # $1 = candidate name → subscribed beams whose members include it
+  # A common mix-up is `/beams:send <name>` where <name> is a PEER (a session),
+  # not a beam. You DM a peer by sending on a beam you BOTH share. This lists the
+  # subscribed beams where a member with that name exists, so send.sh can suggest
+  # the right command instead of a dead "beam does not exist".
+  local who="$1" beam mdir f nm
+  [ -n "$who" ] || return 0
+  [ -f "$BEAMS_CONFIG_FILE" ] || return 0
+  while IFS= read -r beam; do
+    [ -n "$beam" ] || continue
+    mdir=$(beams::beam_members "$beam"); [ -d "$mdir" ] || continue
+    for f in "$mdir"/*.json; do
+      [ -f "$f" ] || continue
+      nm=$(jq -r '.name // ""' "$f" 2>/dev/null)
+      if [ "$nm" = "$who" ]; then printf '%s\n' "$beam"; break; fi
+    done
+  done < <(jq -r '.beams[]?' "$BEAMS_CONFIG_FILE" 2>/dev/null)
+  return 0
 }
