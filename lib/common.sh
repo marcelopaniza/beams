@@ -75,9 +75,43 @@ beams::_resolve_config_dir() {
     if [ -f "$sdir/bound" ]; then
       local bname; bname=$(beams::_safe_key "$(cat "$sdir/bound" 2>/dev/null)")
       if [ -n "$bname" ]; then
-        printf '%s/projects/%s/identities/%s' \
-          "$base" "$(beams::_flatten_path "$(beams::project_dir)")" "$bname"
-        return 0
+        # The pointer names the identity; the PROJECT it lives under must not
+        # hinge on the current cwd — a skill can run from a subdirectory, and
+        # CLAUDE_PROJECT_DIR is often unset after a Claude restart. Resolve in
+        # priority order, stopping at the first that actually holds the identity:
+        #   1. the project recorded at bind time (deterministic, cwd-proof);
+        #   2. the project derived from cwd — the original fast path, so a
+        #      session sitting in its project root behaves EXACTLY as before;
+        #   3. the nearest cwd ANCESTOR that holds the identity (recovers a
+        #      session invoked from a subdirectory). The bound name is fixed, so
+        #      the nearest ancestor holding it is unambiguous.
+        # Steps 1 and 3 only run when step 2 misses — i.e. only when the old
+        # code would already have failed with "not initialised". Pure recovery.
+        local rkey=""
+        if [ -f "$sdir/bound_project" ]; then
+          rkey=$(cat "$sdir/bound_project" 2>/dev/null)
+          # Local-trusted value, but never let it escape the projects/ tree.
+          case "$rkey" in ''|*/*) rkey="" ;; esac
+        fi
+        if [ -n "$rkey" ] && [ -f "$base/projects/$rkey/identities/$bname/config.json" ]; then
+          printf '%s/projects/%s/identities/%s' "$base" "$rkey" "$bname"; return 0
+        fi
+        local dkey; dkey=$(beams::_flatten_path "$(beams::project_dir)")
+        if [ -f "$base/projects/$dkey/identities/$bname/config.json" ]; then
+          printf '%s/projects/%s/identities/%s' "$base" "$dkey" "$bname"; return 0
+        fi
+        local d; d=$(beams::project_dir)
+        case "$d" in /*) ;; *) d="$PWD" ;; esac
+        while [ -n "$d" ] && [ "$d" != "/" ]; do
+          local akey; akey=$(printf '%s' "$d" | sed 's,/,-,g')
+          if [ -f "$base/projects/$akey/identities/$bname/config.json" ]; then
+            printf '%s/projects/%s/identities/%s' "$base" "$akey" "$bname"; return 0
+          fi
+          d=$(dirname "$d")
+        done
+        # Not set up for this identity anywhere reachable → derived path, so
+        # config_require shows the same "not initialised" guidance as before.
+        printf '%s/projects/%s/identities/%s' "$base" "$dkey" "$bname"; return 0
       fi
     fi
     printf '%s' "$sdir"
@@ -412,6 +446,11 @@ beams::bind_session() {
   beams::config_set '.session_name = $v' --arg v "$name"
   beams::lease_claim
   mkdir -p "$sdir"; printf '%s' "$key" > "$sdir/bound"
+  # Pin WHERE this identity lives (its project key) so a later restart, or a
+  # command invoked from a subdirectory, never has to re-derive the project from
+  # a volatile cwd. Read it back from the identity dir itself
+  # (…/projects/<pkey>/identities/<key>), so it always matches the real location.
+  printf '%s' "$(basename "$(dirname "$(dirname "$idir")")")" > "$sdir/bound_project"
   rmdir "$lock_dir" 2>/dev/null || true; trap - EXIT   # end of critical section
 
   # Re-publish presence so peers see this session live on its subscriptions.
