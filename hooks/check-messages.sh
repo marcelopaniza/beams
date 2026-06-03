@@ -50,6 +50,24 @@ cat >/dev/null 2>&1 || true
   state_dir="$beams_config_dir/state"
   stash="$state_dir/hook-mtime-stash"
 
+  # One-shot: a just-completed /beams:name or /beams:join leaves a marker so we
+  # set the Claude Code session title to the new identity on THIS next prompt (a
+  # lib can't call /rename; only a hook can rename a live session). Cheap stat,
+  # present only on the prompt right after a bind. When set, we skip the fast
+  # path below so the title actually gets emitted.
+  pending_title=""
+  _bsid="${CLAUDE_CODE_SESSION_ID:-}"
+  if [ -n "$_bsid" ]; then
+    _ptf="${XDG_CONFIG_HOME:-$HOME/.config}/beams/sessions/$_bsid/title_pending"
+    if [ -f "$_ptf" ] && [ ! -L "$_ptf" ]; then
+      # NB: `read` returns non-zero when the line has no trailing newline even
+      # though it populated the var — so `|| true`, never `|| pending_title=""`
+      # (which would wipe a perfectly-good value read from a newline-less marker).
+      IFS= read -r pending_title < "$_ptf" 2>/dev/null || true
+      rm -f "$_ptf" 2>/dev/null || true
+    fi
+  fi
+
   # If state_dir is itself a symlink, refuse stash operations — a peer who
   # replaces it with a symlink to an attacker-chosen directory could
   # redirect writes elsewhere. Slow path still runs (and delivers
@@ -59,7 +77,7 @@ cat >/dev/null 2>&1 || true
     state_dir_safe=0
   fi
 
-  if [ -r "$cfg" ] && command -v stat >/dev/null 2>&1 && [ "$state_dir_safe" = "1" ]; then
+  if [ -z "$pending_title" ] && [ -r "$cfg" ] && command -v stat >/dev/null 2>&1 && [ "$state_dir_safe" = "1" ]; then
     cfg_mtime=$(stat -c %Y "$cfg" 2>/dev/null || echo 0)
 
     # Refuse to read the stash if it's a symlink (peer-planted redirect).
@@ -123,7 +141,28 @@ cat >/dev/null 2>&1 || true
   fi
 
   # Slow path: full check.sh. Captures any new messages addressed to us.
-  out=$("${CLAUDE_PLUGIN_ROOT}/lib/check.sh" --hook 2>/dev/null) || exit 0
+  out=$("${CLAUDE_PLUGIN_ROOT}/lib/check.sh" --hook 2>/dev/null) || {
+    # check.sh failed (e.g. not initialised) — still honour a pending retitle so
+    # a fresh bind names the tab even when there's no inbox to deliver.
+    [ -n "$pending_title" ] && jq -n --arg t "$pending_title" \
+      '{hookSpecificOutput: {hookEventName: "UserPromptSubmit", sessionTitle: $t}}' 2>/dev/null
+    exit 0
+  }
+  if [ -n "$pending_title" ]; then
+    # A bind just happened: assert the tab title now. Merge into the inbox
+    # payload if there is one; if the merge fails (e.g. check.sh ever emits
+    # something jq can't parse), fall back to a title-only payload so the retitle
+    # is never silently lost — the marker is already consumed at this point.
+    _title_only=$(jq -n --arg t "$pending_title" \
+      '{hookSpecificOutput: {hookEventName: "UserPromptSubmit", sessionTitle: $t}}' 2>/dev/null)
+    if [ -n "$out" ]; then
+      _merged=$(printf '%s' "$out" | jq --arg t "$pending_title" \
+        '.hookSpecificOutput.sessionTitle = $t' 2>/dev/null)
+      if [ -n "$_merged" ]; then out="$_merged"; else out="$_title_only"; fi
+    else
+      out="$_title_only"
+    fi
+  fi
   [ -n "$out" ] && printf '%s' "$out"
 
   # Refresh the stash after every slow-path run (populates first-ever run

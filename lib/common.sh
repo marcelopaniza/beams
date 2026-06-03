@@ -281,6 +281,68 @@ beams::bound_name() {              # echoes the name this session is bound to, i
   [ -f "$pf" ] && beams::_safe_key "$(cat "$pf" 2>/dev/null)"
 }
 
+# ── terminal anchor (which physical terminal is this session in?) ────────────
+# A Claude session id rotates on restart, orphaning the bound pointer. When a
+# project holds SEVERAL identities, a fresh (unbound) session can't tell which
+# one is "its" — UNLESS the terminal it runs in is the same one that bound an
+# identity before. We capture a stable-across-restart key for that terminal from
+# the multiplexer / terminal-app pane id (the same signals the per-pane config
+# key already uses). ONLY these are collision-free enough to drive a SILENT
+# auto-bind: a tmux/screen pane id is monotonic and never recycled within its
+# server. A bare tty recycles, so it is deliberately NOT used here — those cases
+# fall through to the disambiguation list instead of risking a wrong bind.
+beams::terminal_anchor() {
+  local a=""
+  if   [ -n "${TMUX:-}" ] && [ -n "${TMUX_PANE:-}" ]; then a="tmux:${TMUX}:${TMUX_PANE}"
+  elif [ -n "${TERM_SESSION_ID:-}" ];                 then a="termapp:${TERM_SESSION_ID}"
+  elif [ -n "${WT_SESSION:-}" ];                      then a="wt:${WT_SESSION}"
+  elif [ -n "${STY:-}" ];                             then a="screen:${STY}:${WINDOW:-}"
+  fi
+  printf '%s' "$a"
+}
+
+beams::_anchor_key() {             # one filesystem-safe path component for an anchor
+  local k; k=$(printf '%s' "${1:-}" | LC_ALL=C tr -c 'A-Za-z0-9._-' '_' | cut -c1-200)
+  case "$k" in ''|.|..|.*|-*|*..*) printf ''; return 0 ;; esac
+  printf '%s' "$k"
+}
+
+beams::anchor_dir() {              # anchors/ sits beside identities/ under the project key
+  # Derive from the identity config dir when we're operating bound (so it lands
+  # under the identity's REAL project key, not a cwd-derived guess); otherwise
+  # fall back to the cwd-derived project key (the unbound-session lookup path).
+  case "${BEAMS_CONFIG_DIR:-}" in
+    */identities/*) printf '%s/anchors' "${BEAMS_CONFIG_DIR%/identities/*}" ;;
+    *)              printf '%s/anchors' "$(dirname "$(beams::identities_dir)")" ;;
+  esac
+}
+
+beams::anchor_record() {           # $1 = identity name — map THIS terminal → that identity
+  local name="$1" a k dir f tmp
+  a=$(beams::terminal_anchor); [ -n "$a" ] || return 0
+  k=$(beams::_anchor_key "$a"); [ -n "$k" ] || return 0
+  dir=$(beams::anchor_dir); f="$dir/$k"
+  mkdir -p "$dir" 2>/dev/null || return 0
+  [ -L "$f" ] && rm -f "$f"        # never follow a peer-planted symlink
+  tmp=$(mktemp "$dir/.anchor.XXXXXX" 2>/dev/null) || return 0
+  if printf '%s\n%s\n' "$name" "$a" > "$tmp" 2>/dev/null; then
+    mv "$tmp" "$f" 2>/dev/null || rm -f "$tmp"
+  else
+    rm -f "$tmp"
+  fi
+}
+
+beams::anchor_lookup() {           # echo the identity name THIS terminal last bound, or empty
+  local a k f name raw
+  a=$(beams::terminal_anchor); [ -n "$a" ] || return 0
+  k=$(beams::_anchor_key "$a"); [ -n "$k" ] || return 0
+  f="$(beams::anchor_dir)/$k"
+  { [ -f "$f" ] && [ ! -L "$f" ]; } || return 0
+  { IFS= read -r name; IFS= read -r raw; } < "$f" 2>/dev/null || return 0
+  [ "$raw" = "$a" ] || return 0    # guard the (astronomically unlikely) key collision
+  beams::_safe_key "$name"
+}
+
 beams::_now_epoch() { date -u +%s; }
 beams::lease_file() { printf '%s/lease.json' "${1:-$BEAMS_CONFIG_DIR}"; }
 
@@ -452,6 +514,28 @@ beams::bind_session() {
   # (…/projects/<pkey>/identities/<key>), so it always matches the real location.
   printf '%s' "$(basename "$(dirname "$(dirname "$idir")")")" > "$sdir/bound_project"
   rmdir "$lock_dir" 2>/dev/null || true; trap - EXIT   # end of critical section
+
+  # Remember which physical terminal bound this identity, so a later restart in
+  # the SAME terminal silently rebinds to it even when the project holds several
+  # identities (the disambiguation auto-bind). No-op outside tmux/screen.
+  beams::anchor_record "$name" || true
+
+  # Ask the next UserPromptSubmit hook to set the Claude Code session title to
+  # this identity — the harness only renames a live session from a hook, so a lib
+  # can't call /rename itself. SessionStart titles on start/resume; this marker
+  # covers a mid-session /beams:name or /beams:join. Best-effort. Written as a
+  # proper line (trailing newline) so a `read` of it returns success, and via
+  # mktemp+rename with a symlink check — the same hardening as anchor_record /
+  # known_key_pin — so a peer-planted symlink can't redirect this write.
+  local _tpf="$sdir/title_pending" _tptmp
+  [ -L "$_tpf" ] && rm -f "$_tpf"
+  if _tptmp=$(mktemp "$sdir/.title_pending.XXXXXX" 2>/dev/null); then
+    if printf '%s\n' "$name" > "$_tptmp" 2>/dev/null; then
+      mv "$_tptmp" "$_tpf" 2>/dev/null || rm -f "$_tptmp" 2>/dev/null
+    else
+      rm -f "$_tptmp" 2>/dev/null
+    fi
+  fi
 
   # Re-publish presence so peers see this session live on its subscriptions.
   local beam

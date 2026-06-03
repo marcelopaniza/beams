@@ -16,11 +16,12 @@
 #   8. SessionStart brings up the notifier daemon when watch_on_boot is on
 #      (now the default).
 #
-# And the v0.10.0 "auto-bind, never ask" SessionStart policy for an unbound
-# session (a fresh session id after a restart):
+# And the SessionStart policy for an unbound session (a fresh session id after a
+# restart): auto-bind only when CERTAIN which identity this is, else ask.
 #   9.  exactly one bindable (free) identity → silently rebind to it, no prompt.
 #   10. the lone identity is busy (held by another live session) → silent.
-#   11. two-or-more bindable identities → silent (ambiguous, never guesses).
+#   11. two-or-more bindable + no terminal-anchor match → surface the list so the
+#       model can ask (never guesses). Anchor-matched auto-bind: see round-25.
 #
 # The watcher auto-arms on boot by default now, so the suite exports
 # BEAMS_DISABLE_WATCH_ON_BOOT=1 to stay daemon-free (portable under CI); only
@@ -102,11 +103,17 @@ echo "$out" | jq -e '.hookSpecificOutput.additionalContext | contains("boot-chec
   || fail "additionalContext missing the message body"
 pass "SessionStart injected the message"
 
-# ── 2. cursor advanced → silent next time ──────────────────────────────────
-banner "SessionStart is silent once the message is delivered"
+# ── 2. cursor advanced → no re-delivery, but the tab title IS (re)asserted ──
+# A bound session now always carries sessionTitle so the Claude Code tab tracks
+# the identity (the /rename the user used to type). With nothing waiting there
+# must still be NO additionalContext (nothing re-delivered).
+banner "SessionStart re-delivers nothing once read, but sets the tab title"
 out=$(hook "$CFG_A" check-on-start.sh '{"source":"startup"}')
-[ -z "$out" ] || { echo "$out" | sed 's/^/    /'; fail "SessionStart re-delivered an already-seen message"; }
-pass "SessionStart silent after cursor advance"
+echo "$out" | jq -e '.hookSpecificOutput.sessionTitle == "alice"' >/dev/null \
+  || { echo "$out" | sed 's/^/    /'; fail "idle SessionStart didn't set the tab title to the bound identity"; }
+echo "$out" | jq -e '(.hookSpecificOutput.additionalContext // "") == ""' >/dev/null \
+  || { echo "$out" | sed 's/^/    /'; fail "idle SessionStart re-delivered an already-seen message"; }
+pass "SessionStart re-delivers nothing but (re)asserts the tab title"
 
 # ── 3. no config → silent no-op ────────────────────────────────────────────
 banner "SessionStart no-ops for a session with no beams config"
@@ -195,8 +202,13 @@ pass "watch_on_boot:false suppressed the boot watcher"
 # CLAUDE_CODE_SESSION_ID per session (so each is genuinely unbound until the
 # hook decides). Each case gets its own project dir → its own identities dir,
 # so the cases don't contaminate each other.
+# These subtests are about the count-based / ambiguous paths, NOT the terminal
+# anchor — so unset every anchor signal in the subshells. Otherwise a developer
+# running the suite inside tmux would have $TMUX_PANE leak in: mk_identity would
+# record an anchor and boot_unbound would match it, turning the "ambiguous →
+# list" case into a silent auto-bind and breaking subtest 11 nondeterministically.
 mk_identity() {  # $1=session-id  $2=name  $3=project-dir  → creates a durable identity
-  ( unset BEAMS_CONFIG_DIR
+  ( unset BEAMS_CONFIG_DIR TMUX TMUX_PANE TERM_SESSION_ID WT_SESSION STY WINDOW
     export CLAUDE_CODE_SESSION_ID="$1" CLAUDE_PROJECT_DIR="$3"
     mkdir -p "$3"
     "$PLUGIN/lib/init.sh" "$SHARED" >/dev/null
@@ -205,7 +217,7 @@ mk_identity() {  # $1=session-id  $2=name  $3=project-dir  → creates a durable
 idents_of() { printf '%s/beams/projects/%s/identities' \
   "$XDG_CONFIG_HOME" "$(printf '%s' "$1" | sed 's,/,-,g')"; }
 boot_unbound() {  # $1=fresh-session-id  $2=project-dir  → prints the hook's stdout
-  ( unset BEAMS_CONFIG_DIR
+  ( unset BEAMS_CONFIG_DIR TMUX TMUX_PANE TERM_SESSION_ID WT_SESSION STY WINDOW
     export CLAUDE_CODE_SESSION_ID="$1" CLAUDE_PROJECT_DIR="$2" CLAUDE_PLUGIN_ROOT="$PLUGIN"
     printf '%s' '{"source":"startup"}' | "$PLUGIN/hooks/check-on-start.sh" )
 }
@@ -217,9 +229,11 @@ rm -f "$(idents_of "$P_ONE")/solo/lease.json"   # release the lease → 'solo' i
 out=$(boot_unbound sid-fresh1 "$P_ONE")
 echo "$out" | jq -e '.hookSpecificOutput.additionalContext | test("auto-bound to \"solo\"")' >/dev/null \
   || { echo "$out" | sed 's/^/    /'; fail "did not auto-bind to the lone free identity"; }
+echo "$out" | jq -e '.hookSpecificOutput.sessionTitle == "solo"' >/dev/null \
+  || { echo "$out" | sed 's/^/    /'; fail "auto-bind did not set the Claude Code tab title"; }
 [ "$(cat "$XDG_CONFIG_HOME/beams/sessions/sid-fresh1/bound" 2>/dev/null)" = "solo" ] \
   || fail "auto-bind did not write the bound pointer for the new session"
-pass "auto-bound silently to the lone free identity"
+pass "auto-bound silently to the lone free identity (and titled the tab)"
 
 banner "SessionStart stays silent when the lone identity is busy (held elsewhere)"
 P_BUSY="$TMPDIR/proj-busy"
@@ -232,14 +246,21 @@ unset BEAMS_FAKE_LIVE_SESSIONS
 [ -z "$out" ] || { echo "$out" | sed 's/^/    /'; fail "auto-bound (or prompted) for a busy identity — must never steal it"; }
 pass "silent for a busy identity (not stolen)"
 
-banner "SessionStart stays silent when two identities are bindable (ambiguous)"
+banner "SessionStart surfaces the choice when several identities are bindable (ambiguous)"
 P_MULTI="$TMPDIR/proj-multi"
 mk_identity sid-a aaa "$P_MULTI"
 mk_identity sid-b bbb "$P_MULTI"
 rm -f "$(idents_of "$P_MULTI")/aaa/lease.json" "$(idents_of "$P_MULTI")/bbb/lease.json"
 out=$(boot_unbound sid-fresh3 "$P_MULTI")
-[ -z "$out" ] || { echo "$out" | sed 's/^/    /'; fail "auto-bound (or prompted) with two bindable identities — must never guess"; }
-pass "silent when the choice is ambiguous"
+# No terminal anchor (the subshell unsets them) → can't know which one this is,
+# so list both and let the model ask — never guess, never auto-bind.
+echo "$out" | jq -e '.hookSpecificOutput.additionalContext | test("aaa") and test("bbb")' >/dev/null \
+  || { echo "$out" | sed 's/^/    /'; fail "did not surface both bindable identities for the user to pick"; }
+echo "$out" | jq -e '(.hookSpecificOutput.sessionTitle // "") == ""' >/dev/null \
+  || { echo "$out" | sed 's/^/    /'; fail "titled the tab while still unbound (must not)"; }
+[ -z "$(cat "$XDG_CONFIG_HOME/beams/sessions/sid-fresh3/bound" 2>/dev/null)" ] \
+  || fail "must NOT auto-bind when the choice is ambiguous and unanchored"
+pass "surfaced the ambiguous choice instead of guessing"
 
 banner "round 16 complete"
 green "ALL ROUND-16 CHECKS PASSED"

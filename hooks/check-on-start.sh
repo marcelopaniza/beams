@@ -40,22 +40,45 @@ cat >/dev/null 2>&1 || true
   autobound=""
   if ! beams::config_exists; then
     # Unbound session — typically a fresh session id after a Claude restart.
-    # Policy ("auto-bind, never ask"): if EXACTLY ONE durable identity in this
-    # project is bindable — free (no live holder) or already leased by THIS
-    # terminal — silently rebind to it so the session comes back up on its
-    # beams with zero prompting. Zero or multiple bindable, or all of them busy
-    # with another live session, → stay a silent no-op and never ask. A busy
-    # name held by another session is never stolen.
+    # Policy: auto-bind silently ONLY when we're certain WHICH identity this is;
+    # otherwise surface the choice and let the user pick (never guess, never
+    # steal a name a live session still holds).
     idnames=$(beams::list_identity_names 2>/dev/null) || idnames=""
     [ -n "$idnames" ] || exit 0          # no identities → not a beams project
-    cand=""; n=0
+
+    # Identities this terminal could bind right now: free, or already leased by us.
+    bindable=()
     while IFS= read -r nm; do
       [ -n "$nm" ] || continue
       case "$(beams::lease_state "$(beams::identities_dir)/$nm" 2>/dev/null)" in
-        free|mine) cand="$nm"; n=$((n + 1)) ;;
+        free|mine) bindable+=("$nm") ;;
       esac
     done <<< "$idnames"
-    [ "$n" -eq 1 ] || exit 0              # ambiguous, or all busy → silent
+
+    cand=""
+    if [ "${#bindable[@]}" -eq 0 ]; then
+      exit 0                             # all busy (or none) → silent, never steal
+    elif [ "${#bindable[@]}" -eq 1 ]; then
+      cand="${bindable[0]}"              # unambiguous → silent auto-bind (as before)
+    else
+      # Several to choose from. Auto-bind ONLY if we're 100% sure which one this
+      # is — i.e. this exact terminal (a tmux/screen pane) bound one here before.
+      match=$(beams::anchor_lookup 2>/dev/null) || match=""
+      if [ -n "$match" ]; then
+        for nm in "${bindable[@]}"; do
+          [ "$nm" = "$match" ] && { cand="$match"; break; }
+        done
+      fi
+      if [ -z "$cand" ]; then
+        # Not sure → surface the choice as context instead of guessing or going
+        # silent, so the model can ask. `/beams:name <x>` then binds the pick.
+        list=$(printf '%s\n' "${bindable[@]}" | LC_ALL=C sort | sed 's/^/  - /')
+        msg=$(printf 'beams: this terminal is not bound to an identity yet, and this project has %s you can use:\n%s\n\nAsk the user which one to use, then run `/beams:name <name>` (or a new name to create one). Until then, beams commands here report "not initialised".' "${#bindable[@]}" "$list")
+        jq -n --arg ev SessionStart --arg ctx "$msg" \
+          '{hookSpecificOutput: {hookEventName: $ev, additionalContext: $ctx}}'
+        exit 0
+      fi
+    fi
 
     # Bind silently, in a SUBSHELL: bind_session calls beams::die (exit) on
     # recoverable failures (lost the concurrent-bind race → busy, no session id,
@@ -112,22 +135,44 @@ cat >/dev/null 2>&1 || true
     disown 2>/dev/null || true
   fi
 
+  # Emit one SessionStart payload carrying whatever applies:
+  #   - sessionTitle: the Claude Code tab name — asserted whenever we're bound,
+  #     so the tab always tracks the identity (the auto-/beams:name the user used
+  #     to do by hand). Silent (no field) when unbound.
+  #   - additionalContext: the auto-bind note and/or any unread inbox.
+  #   - systemMessage: the user-visible inbox banner (only when unread arrived).
+  # Nothing applicable → no output at all (idle, unbound).
+  title=""
+  beams::config_exists && title=$(beams::config_get '.session_name' 2>/dev/null)
+
+  note=""
   if [ -n "$autobound" ]; then
-    # Inform the model who it now is (a statement, not a prompt) and fold in any
-    # unread the pull surfaced, so one SessionStart context covers both.
-    note="beams: this terminal had no bound identity, so it auto-bound to \"$autobound\" for this project (e.g. resuming after a Claude restart). You are now live on that identity's subscribed beams."
-    extra=""; sysmsg=""
-    if [ -n "$out" ]; then
-      extra=$(printf '%s' "$out" | jq -r '.hookSpecificOutput.additionalContext // empty' 2>/dev/null)
-      sysmsg=$(printf '%s' "$out" | jq -r '.systemMessage // empty' 2>/dev/null)
-    fi
-    if [ -n "$extra" ]; then ctx=$(printf '%s\n\n%s' "$note" "$extra"); else ctx="$note"; fi
-    jq -n --arg ctx "$ctx" --arg sysmsg "$sysmsg" \
-      'if $sysmsg == "" then {hookSpecificOutput: {hookEventName: "SessionStart", additionalContext: $ctx}}
-       else {hookSpecificOutput: {hookEventName: "SessionStart", additionalContext: $ctx}, systemMessage: $sysmsg} end' 2>/dev/null || true
-  else
-    [ -n "$out" ] && printf '%s' "$out"
+    note="beams: this terminal had no bound identity, so it auto-bound to \"$autobound\" for this project (e.g. resuming after a Claude restart, or the same terminal you used before). You are now live on that identity's subscribed beams."
   fi
+  extra=""; sysmsg=""
+  if [ -n "$out" ]; then
+    extra=$(printf '%s' "$out" | jq -r '.hookSpecificOutput.additionalContext // empty' 2>/dev/null)
+    sysmsg=$(printf '%s' "$out" | jq -r '.systemMessage // empty' 2>/dev/null)
+  fi
+  ctx=""
+  if   [ -n "$note" ] && [ -n "$extra" ]; then ctx=$(printf '%s\n\n%s' "$note" "$extra")
+  elif [ -n "$note" ];  then ctx="$note"
+  elif [ -n "$extra" ]; then ctx="$extra"
+  fi
+
+  if [ -n "$ctx" ] || [ -n "$title" ]; then
+    jq -n --arg ev SessionStart --arg ctx "$ctx" --arg t "$title" --arg sysmsg "$sysmsg" '
+      ({hookSpecificOutput: (
+          {hookEventName: $ev}
+          + (if $ctx != "" then {additionalContext: $ctx} else {} end)
+          + (if $t   != "" then {sessionTitle: $t}        else {} end)
+        )}
+       + (if $sysmsg != "" then {systemMessage: $sysmsg} else {} end))' 2>/dev/null || true
+  fi
+
+  # We just (re)asserted the title at SessionStart — drop any pending-retitle
+  # marker so the next UserPromptSubmit doesn't redundantly set it again.
+  rm -f "$BEAMS_BASE_DIR/sessions/$(beams::terminal_id)/title_pending" 2>/dev/null || true
 } 2>/dev/null
 
 exit 0
