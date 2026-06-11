@@ -126,6 +126,36 @@ cat >/dev/null 2>&1 || true
     if { [ -n "${BEAMS_CHANNEL_TOKEN:-}" ] || [ -n "${BEAMS_CHANNEL_TOKEN_FILE:-}" ] || [ "${BEAMS_CHANNEL_AUTOWIRE:-}" = "1" ]; } \
        && command -v curl >/dev/null 2>&1; then
       export BEAMS_CHANNEL_TOKEN BEAMS_CHANNEL_TOKEN_FILE
+      # Publish WHICH session is live for this identity, so the long-lived,
+      # per-identity watcher's on-message hook rings THIS session's channel
+      # server instead of the frozen id of whoever first armed it — the cause of
+      # the doorbell going dead after the arming session ends. Newest session
+      # wins (one watcher per identity can wake only one session anyway). Atomic
+      # mktemp+mv so a concurrent on-message read never sees a half-written file;
+      # identifier-safe the id first. No session id → nothing to publish (the
+      # hook falls back to its own CLAUDE_CODE_SESSION_ID).
+      __csid="${CLAUDE_CODE_SESSION_ID:-}"; __csid="${__csid//[^A-Za-z0-9_-]/}"
+      if [ -n "$__csid" ]; then
+        __ptmp=$(mktemp "$BEAMS_CONFIG_DIR/.channel.session.XXXXXX" 2>/dev/null) \
+          && printf '%s\n' "$__csid" > "$__ptmp" \
+          && mv -f "$__ptmp" "$BEAMS_CONFIG_DIR/channel.session" 2>/dev/null \
+          || rm -f "${__ptmp:-}" 2>/dev/null
+      fi
+      # Opportunistic, backgrounded hygiene: drop rendezvous .port files whose
+      # server is gone (curl exit 7 == connection refused == nothing listening).
+      # Bounded localhost probes, once per session start, fully detached so it
+      # adds no boot latency. A busy-but-alive server times out (not refused) and
+      # is left alone; a live server's file only exists AFTER it has listened, so
+      # this never race-deletes a still-starting server's file.
+      ( __chan="${XDG_CONFIG_HOME:-$HOME/.config}/beams/channels"
+        [ -d "$__chan" ] || exit 0
+        for __pf in "$__chan"/*.port; do
+          [ -f "$__pf" ] || continue
+          IFS= read -r __pp < "$__pf" 2>/dev/null || true
+          case "$__pp" in ''|*[!0-9]*) continue ;; esac
+          curl -s -m 1 "http://127.0.0.1:${__pp}/health" >/dev/null 2>&1
+          [ $? -eq 7 ] && rm -f "$__pf" 2>/dev/null
+        done ) >/dev/null 2>&1 </dev/null &
       nohup bash "$root/lib/watch.sh" start \
         --on-message "bash $(printf '%q' "$root/channel/on-message.sh")" \
         >/dev/null 2>&1 </dev/null &

@@ -4,6 +4,12 @@ All notable changes are documented here. Format follows [Keep a Changelog](https
 
 > **Lineage.** Beams is the proactive/reactive fork of [buses](https://github.com/marcelopaniza/buses) — a pure-bash cross-terminal messenger. Beams begins at **0.9.0** and inherits buses' version history below (entries at 0.8.1 and earlier were released as *buses*; the API and on-disk format are shared, the names are not — Beams uses its own `~/.config/beams` and `<shared>/beams/` namespace). The 0.9.0 entry is Beams' first release: the proactive-delivery layer that buses deliberately does not carry.
 
+## [Unreleased]
+
+### Fixed
+
+- **The real-time doorbell silently went dead after the session that armed it ended.** The watcher is a long-lived, per-identity singleton, but `channel/on-message.sh` resolved *which* session to wake from the watcher's own frozen `CLAUDE_CODE_SESSION_ID` — baked in when the watcher first started. Channel servers are per-session and come and go, so once the arming session ended, every POST forever targeted that dead session's stale `.port` file: the watcher looked "running" but woke nobody, and reconnects/restarts/`/clear` all inherited the dead target (the doorbell felt "unreliable"). Now SessionStart publishes the current session id to an identity-scoped pointer (`$BEAMS_CONFIG_DIR/channel.session`, atomic `mktemp`+`mv`) that each new session refreshes, and `on-message.sh` reads *that* first — falling back to its own `CLAUDE_CODE_SESSION_ID` for smoke tests / manual runs / pre-pointer setups. `on-message.sh` also `/health`-gates the resolved port (a `curl` connection-refused means the rendezvous file is stale, so it unlinks it to self-heal), and SessionStart backgrounds a bounded prune of refused `.port` files so dead rendezvous files stop accumulating. New `tests/round-27.sh` (pointer beats a frozen env id; pointer-less fallback stays compatible with round-21; dead target is health-gated and self-healed; SessionStart publishes the pointer and prunes only the refused file).
+
 ## [0.10.2] — 2026-06-02
 
 Real-time wake-up that actually fans out to a fleet, restart-safe name reclaim, and a security pass that closes a shared-folder impersonation hole. Gated on a 5-reviewer pentest (4 Sonnet surfaces + Opus synthesis) before release.
