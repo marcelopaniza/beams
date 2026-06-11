@@ -6,7 +6,7 @@
 #      never escalate to `kill -TERM/-KILL -1` (signal every process we own).
 #   C. the watcher writes its pid via rename, never THROUGH a planted symlink.
 #   D. a far-future-dated junk .msg cannot freeze the cursor (denial of delivery).
-#   E. channel/on-message.sh exits promptly when the port file is a FIFO (no hang).
+#   E. lib/on-message.sh exits promptly when wake.log is a FIFO (no hang).
 
 set -euo pipefail
 
@@ -93,16 +93,18 @@ printf '%s' "$out" | grep -q 'hello from bob' \
   || fail "future-dated junk froze the cursor — bob's message was never delivered"
 pass "legit message delivered despite a year-2099 junk file (cursor clamped to now)"
 
-# ── E. on-message.sh does not hang on a FIFO port file ──────────────────────
-banner "E. channel/on-message.sh exits promptly when the port file is a FIFO"
+# ── E. on-message.sh does not hang on a FIFO wake file ──────────────────────
+banner "E. lib/on-message.sh exits promptly when wake.log is a FIFO"
 if command -v timeout >/dev/null 2>&1; then
-  CH="$XDG_CONFIG_HOME/beams/channels"; mkdir -p "$CH"
-  mkfifo "$CH/sessfifo.port"
-  CLAUDE_CODE_SESSION_ID=sessfifo BEAMS_CHANNEL_TOKEN=x \
+  OMCFG="$TMP/om-fifo-cfg"; mkdir -p "$OMCFG"
+  mkfifo "$OMCFG/wake.log"
+  BEAMS_CONFIG_DIR="$OMCFG" \
     BEAMS_BEAM=all BEAMS_FROM=z BEAMS_PREVIEW=hi \
-    timeout 5 bash "$PLUGIN/channel/on-message.sh"; rc=$?
-  [ "$rc" -ne 124 ] || fail "on-message.sh hung on a FIFO port file (timed out)"
-  pass "on-message.sh returned promptly on a FIFO port file (rc=$rc)"
+    timeout 5 bash "$PLUGIN/lib/on-message.sh"; rc=$?
+  [ "$rc" -ne 124 ] || fail "on-message.sh hung on a FIFO wake file (timed out)"
+  [ "$rc" -eq 0 ]   || fail "on-message.sh exited rc=$rc on a FIFO wake file (want silent 0)"
+  [ -p "$OMCFG/wake.log" ] || fail "on-message.sh replaced or wrote through the FIFO"
+  pass "on-message.sh refused the FIFO wake file promptly (rc=$rc)"
 else
   echo "  (skipped — no 'timeout' on this host)"
 fi

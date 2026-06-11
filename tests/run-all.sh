@@ -16,7 +16,9 @@ export PLUGIN_ROOT
 export XDG_CONFIG_HOME="$(mktemp -d "${TMPDIR:-/tmp}/beams-runall-xdg.XXXXXX")"
 trap 'rm -rf "$XDG_CONFIG_HOME"' EXIT
 ROUNDS=("$@")
-[ "${#ROUNDS[@]}" -eq 0 ] && ROUNDS=(1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27)
+# 21 and 27 tested the retired channel-server transport (removed in 0.11.0 —
+# the Monitor wake-file doorbell replaced it; round 28 covers that).
+[ "${#ROUNDS[@]}" -eq 0 ] && ROUNDS=(1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 22 23 24 25 26 28)
 
 red()   { printf '\033[31m%s\033[0m\n' "$*"; }
 green() { printf '\033[32m%s\033[0m\n' "$*"; }

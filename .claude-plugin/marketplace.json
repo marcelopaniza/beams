@@ -8,7 +8,7 @@
   "plugins": [
     {
       "name": "beams",
-      "description": "Sessions sign in to named beams on a shared folder; messages are delivered on the next prompt and at session start via hooks, with an opt-in real-time channel that wakes an idle session. Works on a single machine or across machines that share storage (NFS/SMB/Syncthing/Dropbox).",
+      "description": "Sessions sign in to named beams on a shared folder; messages are delivered on the next prompt, at session start, and — on by default — the instant they arrive, waking an idle session in real time. Works on a single machine or across machines that share storage (NFS/SMB/Syncthing/Dropbox).",
       "source": "./",
       "category": "productivity"
     }

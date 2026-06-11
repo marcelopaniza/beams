@@ -36,16 +36,12 @@ beams/
 │   ├── require-signatures.sh
 │   ├── admin.sh                      #   /beams:admin dispatcher (driver/maintenance verbs)
 │   ├── watch.sh                       #   /beams:watch dispatcher
-│   └── watcher_daemon.sh              #   detached polling daemon
-├── channel/                           # opt-in real-time MCP "doorbell" (experimental)
-│   ├── beams-channel.mjs              #   zero-dep Node MCP stdio channel server
-│   ├── .mcp.json.example              #   registration example
-│   ├── README.md                      #   setup + security
-│   └── smoke.sh                       #   self-contained handshake/POST smoke
+│   ├── watcher_daemon.sh              #   detached polling daemon
+│   └── on-message.sh                  #   watcher hook: the wake-file doorbell (one line per message)
 ├── presets/                           # /beams:admin init --profile <name> overlays
 │   └── hermes.json   responder.json
-├── tests/                             # smoke tests, 19 rounds
-│   ├── round-{1..19}.sh
+├── tests/                             # smoke tests (rounds 21/27 retired with the channel server)
+│   ├── round-{1..28}.sh
 │   └── run-all.sh
 ├── assets/                            # README marketing images + sources
 │   ├── beams-hero.jpg        beams-any-ai.jpg        # used in the README

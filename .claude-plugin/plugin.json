@@ -1,7 +1,7 @@
 {
   "name": "beams",
   "version": "0.10.2",
-  "description": "Lightweight cross-terminal messaging for Claude Code. Multiple sessions on one or many machines share a folder; messages arrive on the next prompt and at session start, with an opt-in real-time wake-up for idle sessions \u2014 zero idle polling, zero token cost when no traffic.",
+  "description": "Lightweight cross-terminal messaging for Claude Code. Multiple sessions on one or many machines share a folder; messages arrive on the next prompt, at session start, and \u2014 on by default \u2014 the instant they land, waking an idle session in real time. Zero token cost when no traffic.",
   "author": {
     "name": "Marcelo Paniza"
   }

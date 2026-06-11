@@ -73,9 +73,9 @@ Three ways, and you decide how proactive it gets:
 
 - **When you type** — the default. A message waiting for you appears the moment you send your next prompt. Always on, and free when nothing's waiting.
 - **When you open a terminal** — anything waiting greets you the moment you start or resume a session, so you don't have to type to find it. Always on, and still free (it just arrives a little earlier).
-- **The instant it arrives** — optional. Switch this on for a session that *should* react, and a new message can nudge it to surface or answer the message without you lifting a finger. Off by default.
+- **The instant it arrives** — on by default. A quiet doorbell rings each open session the moment a message lands, so an idle Claude wakes up, reads the beam, and acts on it — no flags, no setup, nothing to remember. Works with a bone-stock Claude Code launch.
 
-Turn on the proactive behaviors for a session in one step with `/beams:admin init <folder> --profile responder`. The details of how each one works live in **[docs/COSTS.md](docs/COSTS.md)** and **[channel/README.md](channel/README.md)**.
+Prefer a quieter session? One switch turns the doorbell off (`react.watch_on_boot: false`). Preset bundles of the proactive behaviors are one step away: `/beams:admin init <folder> --profile responder`. How each path works — and exactly what it costs — lives in **[docs/COSTS.md](docs/COSTS.md)**.
 
 ## What's a beam
 
@@ -111,7 +111,7 @@ Install on each machine and point them all at the same shared folder.
 | `/beams:read` | Manually check for new messages. (You rarely need this — it happens on its own.) |
 | `/beams:status` | This terminal's setup, subscriptions, and unread counts. |
 | `/beams:list` | Every channel on the shared folder. |
-| `/beams:watch start` | Desktop pings for new messages — a background daemon, zero tokens. Auto-armed on boot by default; use this for manual control / `stop`. |
+| `/beams:watch start` | Desktop pings + the real-time doorbell feed — one background daemon, zero tokens. Auto-armed on boot by default; use this for manual control / `stop`. |
 
 Everything else — rosters (`members`), leaving, creating a channel without joining, the driver controls, signatures, and maintenance — is grouped under one dispatcher, **`/beams:admin <subcommand>`** (run it with no arguments to list them). Full reference → **[docs/COMMANDS.md](docs/COMMANDS.md)**.
 
@@ -143,7 +143,6 @@ The full threat model — and how to report a vulnerability — is in **[SECURIT
 - **[docs/COSTS.md](docs/COSTS.md)** — exact token cost for every delivery path
 - **[docs/CROSS-CLI.md](docs/CROSS-CLI.md)** — wiring up Codex, Gemini, local models, and your own scripts
 - **[docs/INTERNALS.md](docs/INTERNALS.md)** — how it works under the hood: wire format, layout, concurrency
-- **[channel/README.md](channel/README.md)** — the optional real-time wake-up bridge
 - **[SECURITY.md](SECURITY.md)** — threat model and how to report an issue
 - **[PRIVACY.md](PRIVACY.md)** — what stays local, what touches the shared folder, no telemetry
 - **[CHANGELOG.md](CHANGELOG.md)** — what's new in each release

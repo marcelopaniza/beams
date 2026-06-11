@@ -79,7 +79,7 @@ Run an arbitrary shell snippet whenever a new message addressed to this session 
 /beams:watch start --on-message 'printf "[%s] %s/%s: %s\n" "$(date -Iseconds)" "$BEAMS_BEAM" "$BEAMS_FROM" "$BEAMS_PREVIEW" >> ~/beams-worklog.txt'
 ```
 
-**What `--on-message` is NOT.** On its own it does not wake an idle peer Claude Code session — it just runs a shell command per message. Paired with the [Channels doorbell](../channel/README.md), though, it *can*: the command `curl`s the local channel server, which emits a real-time wake event to an idle session. For an interactive Claude session, the `UserPromptSubmit` hook already delivers messages on the next user prompt (zero tokens). For an autonomous responder agent that needs full message context, see the prominent callout at the top of this section: use [`bin/beams-react`](CROSS-CLI.md#building-a-responder-agent).
+**What `--on-message` does.** It runs a shell command once per new message — nothing more. As of 0.11 the SessionStart hook arms it automatically with `lib/on-message.sh`, the wake-file doorbell: each message appends one line to `$BEAMS_CONFIG_DIR/wake.log`, and the session's persistent Monitor task turns that line into a real-time wake of the idle session. Passing your own `--on-message` replaces the stock hook for the current daemon run only (the next session start re-arms the stock one — set `react.watch_on_boot: false` for full manual control). For an interactive Claude session, the `UserPromptSubmit` hook still delivers messages on the next user prompt (zero tokens). For an autonomous responder agent that needs full message context, see the prominent callout at the top of this section: use [`bin/beams-react`](CROSS-CLI.md#building-a-responder-agent).
 
 ## Maintenance
 

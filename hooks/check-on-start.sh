@@ -5,11 +5,16 @@
 # so the session greets you already aware of the beam. Silent + ~0 tokens when
 # there's nothing waiting; never blocks or fails session start.
 #
-# Always-on watcher: unless this session opted out (react.watch_on_boot:false,
-# or the BEAMS_DISABLE_WATCH_ON_BOOT=1 env escape hatch for headless/CI/tests),
-# also start the background notifier daemon idempotently — so EVERY session gets
-# the real-time doorbell without the user remembering `/beams:watch start`. The
-# daemon is zero-token (pure polling); the only cost is one background process.
+# Always-on watcher + doorbell: unless this session opted out
+# (react.watch_on_boot:false, or the BEAMS_DISABLE_WATCH_ON_BOOT=1 env escape
+# hatch for headless/CI/tests), also (re)start the background notifier daemon
+# armed with the wake-file hook (lib/on-message.sh) — so EVERY session gets
+# desktop notifications AND the flag-free real-time doorbell without the user
+# remembering `/beams:watch start`. The daemon is zero-token (pure polling);
+# the only cost is one background process. We additionally emit an
+# additionalContext instruction asking the session to arm a persistent Monitor
+# on the wake file — that monitor is what turns an appended line into a wake
+# of an idle session (a hook can't start a model tool; it can only ask).
 #
 # A missing config (a terminal that never ran /beams:init) is normally a silent
 # no-op so beams stays invisible to non-users — EXCEPT when this project has
@@ -21,8 +26,9 @@
 
 set -uo pipefail
 
-# Drain stdin (Claude Code passes SessionStart JSON we don't consume).
-cat >/dev/null 2>&1 || true
+# Capture the SessionStart JSON; we only consume .source (startup | resume |
+# clear | compact), to decide whether to re-emit the doorbell-arm instruction.
+__hook_in=$(cat 2>/dev/null) || __hook_in=""
 
 # Be paranoid: a misconfigured hook must never break the user's session.
 {
@@ -104,10 +110,10 @@ cat >/dev/null 2>&1 || true
   # Default-on: bring up the notifier daemon on boot so every session gets
   # desktop notifications for new beams. Opt out per-session with
   # react.watch_on_boot:false, or globally with BEAMS_DISABLE_WATCH_ON_BOOT=1
-  # (headless/CI/tests). Idempotent (watch.sh no-ops when one is already
-  # running), detached, and fully silenced so its "watcher started" line never
-  # leaks into the session context. Pin BEAMS_CONFIG_DIR so the daemon resolves
-  # the exact same identity this hook did.
+  # (headless/CI/tests). Detached, and fully silenced so its "watcher
+  # (re)started" lines never leak into the session context. Pin
+  # BEAMS_CONFIG_DIR so the daemon resolves the exact same identity this hook
+  # did.
   # Read the raw value, NOT beams::config_get — config_get appends `// ""`, and
   # jq's `//` treats JSON false as empty, so an explicit watch_on_boot:false
   # would collapse to "" and the `!= "false"` test would WRONGLY arm. Plain jq
@@ -116,53 +122,53 @@ cat >/dev/null 2>&1 || true
   __wob=$(jq -r '.react.watch_on_boot' "$BEAMS_CONFIG_FILE" 2>/dev/null)
   if [ "${BEAMS_DISABLE_WATCH_ON_BOOT:-}" != "1" ] && [ "$__wob" != "false" ]; then
     export BEAMS_CONFIG_DIR
-    # Real-time doorbell: when this session was launched with the channel (a
-    # channel token is present, or BEAMS_CHANNEL_AUTOWIRE=1 for a token-less/dev
-    # setup) AND curl is available, arm the watcher's --on-message hook too, so a
-    # new beam WAKES this idle session via a <channel> event instead of only
-    # pinging the desktop. The hook (channel/on-message.sh) finds this session's
-    # channel-server port from the per-session rendezvous file the server
-    # publishes. No channel → the plain notify-only watcher, exactly as before.
-    if { [ -n "${BEAMS_CHANNEL_TOKEN:-}" ] || [ -n "${BEAMS_CHANNEL_TOKEN_FILE:-}" ] || [ "${BEAMS_CHANNEL_AUTOWIRE:-}" = "1" ]; } \
-       && command -v curl >/dev/null 2>&1; then
-      export BEAMS_CHANNEL_TOKEN BEAMS_CHANNEL_TOKEN_FILE
-      # Publish WHICH session is live for this identity, so the long-lived,
-      # per-identity watcher's on-message hook rings THIS session's channel
-      # server instead of the frozen id of whoever first armed it — the cause of
-      # the doorbell going dead after the arming session ends. Newest session
-      # wins (one watcher per identity can wake only one session anyway). Atomic
-      # mktemp+mv so a concurrent on-message read never sees a half-written file;
-      # identifier-safe the id first. No session id → nothing to publish (the
-      # hook falls back to its own CLAUDE_CODE_SESSION_ID).
-      __csid="${CLAUDE_CODE_SESSION_ID:-}"; __csid="${__csid//[^A-Za-z0-9_-]/}"
-      if [ -n "$__csid" ]; then
-        __ptmp=$(mktemp "$BEAMS_CONFIG_DIR/.channel.session.XXXXXX" 2>/dev/null) \
-          && printf '%s\n' "$__csid" > "$__ptmp" \
-          && mv -f "$__ptmp" "$BEAMS_CONFIG_DIR/channel.session" 2>/dev/null \
-          || rm -f "${__ptmp:-}" 2>/dev/null
-      fi
-      # Opportunistic, backgrounded hygiene: drop rendezvous .port files whose
-      # server is gone (curl exit 7 == connection refused == nothing listening).
-      # Bounded localhost probes, once per session start, fully detached so it
-      # adds no boot latency. A busy-but-alive server times out (not refused) and
-      # is left alone; a live server's file only exists AFTER it has listened, so
-      # this never race-deletes a still-starting server's file.
-      ( __chan="${XDG_CONFIG_HOME:-$HOME/.config}/beams/channels"
-        [ -d "$__chan" ] || exit 0
-        for __pf in "$__chan"/*.port; do
-          [ -f "$__pf" ] || continue
-          IFS= read -r __pp < "$__pf" 2>/dev/null || true
-          case "$__pp" in ''|*[!0-9]*) continue ;; esac
-          curl -s -m 1 "http://127.0.0.1:${__pp}/health" >/dev/null 2>&1
-          [ $? -eq 7 ] && rm -f "$__pf" 2>/dev/null
-        done ) >/dev/null 2>&1 </dev/null &
-      nohup bash "$root/lib/watch.sh" start \
-        --on-message "bash $(printf '%q' "$root/channel/on-message.sh")" \
-        >/dev/null 2>&1 </dev/null &
-    else
-      nohup bash "$root/lib/watch.sh" start >/dev/null 2>&1 </dev/null &
+
+    # Real-time doorbell, flag-free: EVERY watcher is armed with the wake-file
+    # hook (lib/on-message.sh), which appends one line per new message to
+    # $BEAMS_CONFIG_DIR/wake.log. The persistent Monitor this session is asked
+    # to arm (additionalContext below) turns each appended line into a harness
+    # event that wakes the session even when it is fully idle. Start the file
+    # fresh: anything already in it predates this session start and was just
+    # surfaced by the boot pull above — replaying it would double-deliver.
+    # Never truncate through a peer-planted symlink (drop the name instead);
+    # a FIFO/device at the path is left alone for the hook's own [ -f ] gate.
+    __wake="$BEAMS_CONFIG_DIR/wake.log"
+    [ -L "$__wake" ] && rm -f "$__wake" 2>/dev/null
+    if [ ! -e "$__wake" ] || [ -f "$__wake" ]; then
+      : > "$__wake" 2>/dev/null || true
     fi
+
+    # `restart`, not `start`: a daemon surviving from before an upgrade (one
+    # armed with the retired channel hook, or with no hook at all) would
+    # otherwise keep running with a stale environment forever — start is a
+    # no-op while one is alive. The bounce is safe: the notify cursor lives on
+    # disk, so no message is lost or re-notified across it.
+    nohup bash "$root/lib/watch.sh" restart \
+      --on-message "bash $(printf '%q' "$root/lib/on-message.sh")" \
+      >/dev/null 2>&1 </dev/null &
     disown 2>/dev/null || true
+    __doorbell=1
+  fi
+
+  # Ask the session to arm the doorbell Monitor. Emitted whenever the watcher
+  # was armed, EXCEPT after a compaction — monitors are background tasks and
+  # survive those, so re-instructing would only breed duplicates. startup and
+  # resume get a fresh process (no monitors yet); /clear may or may not have
+  # kept them — every emission tells the model to check before arming.
+  wake_note=""
+  if [ "${__doorbell:-}" = "1" ]; then
+    __hook_src=$(printf '%s' "${__hook_in:-}" | jq -r '.source // empty' 2>/dev/null) || __hook_src=""
+    if [ "$__hook_src" != "compact" ]; then
+      __nm=""
+      beams::config_exists && __nm=$(beams::config_get '.session_name' 2>/dev/null)
+      [ -n "$__nm" ] || __nm="unnamed"
+      wake_note="beams doorbell: this identity's real-time wake events land in ${BEAMS_CONFIG_DIR}/wake.log (a background watcher appends one line per new beam message). To be woken the moment a message arrives — even while sitting idle — arm the doorbell now, exactly once per session: if an active background task named 'beams doorbell' already exists (check TaskList), do nothing; otherwise call the Monitor tool with exactly these arguments:
+  description: beams doorbell (${__nm})
+  command: tail -n 0 -F '${BEAMS_CONFIG_DIR}/wake.log'
+  persistent: true
+  timeout_ms: 3600000
+Each event line the monitor emits is a new beam message (sender + preview). When one arrives: run /beams:read to fetch the full message, surface it to the user (who it's from + a short summary), and reply on the beam only if this session's role/instructions call for autonomous replies. Keep the monitor running for the whole session — do not stop it after an event. If the Monitor tool is unavailable in this harness, skip this; messages still arrive on your next prompt."
+    fi
   fi
 
   # Emit one SessionStart payload carrying whatever applies:
@@ -185,10 +191,10 @@ cat >/dev/null 2>&1 || true
     sysmsg=$(printf '%s' "$out" | jq -r '.systemMessage // empty' 2>/dev/null)
   fi
   ctx=""
-  if   [ -n "$note" ] && [ -n "$extra" ]; then ctx=$(printf '%s\n\n%s' "$note" "$extra")
-  elif [ -n "$note" ];  then ctx="$note"
-  elif [ -n "$extra" ]; then ctx="$extra"
-  fi
+  for __piece in "$note" "$extra" "$wake_note"; do
+    [ -n "$__piece" ] || continue
+    if [ -n "$ctx" ]; then ctx=$(printf '%s\n\n%s' "$ctx" "$__piece"); else ctx="$__piece"; fi
+  done
 
   if [ -n "$ctx" ] || [ -n "$title" ]; then
     jq -n --arg ev SessionStart --arg ctx "$ctx" --arg t "$title" --arg sysmsg "$sysmsg" '
