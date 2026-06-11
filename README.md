@@ -7,13 +7,13 @@
 **Get your AI windows talking — across screens, across machines, with near-zero cost.**
 
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
-[![Version](https://img.shields.io/badge/version-0.10.1-blue.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-0.11.0-blue.svg)](CHANGELOG.md)
 [![Works with](https://img.shields.io/badge/works%20with-Claude%20%7C%20Codex%20%7C%20Gemini%20%7C%20local%20LLMs-orange.svg)](#works-with-any-ai)
 [![Messages](https://img.shields.io/badge/messages-unforgeable-yellow.svg)](SECURITY.md)
-[![Tests](https://img.shields.io/badge/tests-19%20rounds%20green-brightgreen.svg)](tests/)
+[![Tests](https://img.shields.io/badge/tests-26%20rounds%20green-brightgreen.svg)](tests/)
 [![Bash](https://img.shields.io/badge/-bash%204%2B-4EAA25?logo=gnu-bash&logoColor=white)](#requirements)
 
-You know how you end up with three or four AI terminals open — backend in one, frontend in another, one running tests — and you're copy-pasting between them like a hostage negotiator? **Beams makes that stop.** Your AI sessions leave each other notes, broadcast updates, and tag each other into threads. Everything flows through a folder they all share, and a message just *appears* in the other window the next time you use it.
+You know how you end up with three or four AI terminals open — backend in one, frontend in another, one running tests — and you're copy-pasting between them like a hostage negotiator? **Beams makes that stop.** Your AI sessions leave each other notes, broadcast updates, and tag each other into threads. Everything flows through a folder they all share — and a message doesn't wait to be noticed: it **rings the other window**, which wakes up and reads it on the spot.
 
 It's **built for Claude Code** — install the plugin and messages arrive on their own. And because the messages are really just files in a shared folder, **any other AI can join too**: Codex, Gemini, DeepSeek, a local model, or your own script.
 
@@ -45,7 +45,7 @@ In a second terminal — same machine or another one — run the same three line
 /beams:send all <name-of-terminal-B> "hey, can you check the build log?"
 ```
 
-Terminal B shows a **`📬 beams: 1 new message from <A>`** line above its next answer, the moment you type anything there. No polling. No wasted tokens.
+Now watch terminal B: it stirs **on its own** and reads the message — you never touched it. (If it's busy or closed, the note waits politely and shows up as a **`📬 beams`** line with its next answer.) No babysitting, no wasted tokens.
 
 ## Works with any AI
 
@@ -73,9 +73,9 @@ Three ways, and you decide how proactive it gets:
 
 - **When you type** — the default. A message waiting for you appears the moment you send your next prompt. Always on, and free when nothing's waiting.
 - **When you open a terminal** — anything waiting greets you the moment you start or resume a session, so you don't have to type to find it. Always on, and still free (it just arrives a little earlier).
-- **The instant it arrives** — on by default. A quiet doorbell rings each open session the moment a message lands, so an idle Claude wakes up, reads the beam, and acts on it — no flags, no setup, nothing to remember. Works with a bone-stock Claude Code launch.
+- **The instant it arrives** — on by default. A quiet doorbell rings the other session the moment a message lands, so an idle Claude wakes up and reads it — no setup, nothing to remember.
 
-Prefer a quieter session? One switch turns the doorbell off (`react.watch_on_boot: false`). Preset bundles of the proactive behaviors are one step away: `/beams:admin init <folder> --profile responder`. How each path works — and exactly what it costs — lives in **[docs/COSTS.md](docs/COSTS.md)**.
+Want a session that *answers* by itself, with no human in the middle? That's one command — the responder profile. Prefer one that stays quiet? One switch. Recipes for both, and the exact token cost of every path: **[docs/AUTONOMY.md](docs/AUTONOMY.md)** · **[docs/COSTS.md](docs/COSTS.md)**.
 
 ## What's a beam
 
@@ -140,6 +140,7 @@ The full threat model — and how to report a vulnerability — is in **[SECURIT
 ## More documentation
 
 - **[docs/COMMANDS.md](docs/COMMANDS.md)** — driver, watcher, maintenance, and cleanup commands
+- **[docs/AUTONOMY.md](docs/AUTONOMY.md)** — make a session answer on its own (and what it still refuses to do)
 - **[docs/COSTS.md](docs/COSTS.md)** — exact token cost for every delivery path
 - **[docs/CROSS-CLI.md](docs/CROSS-CLI.md)** — wiring up Codex, Gemini, local models, and your own scripts
 - **[docs/INTERNALS.md](docs/INTERNALS.md)** — how it works under the hood: wire format, layout, concurrency

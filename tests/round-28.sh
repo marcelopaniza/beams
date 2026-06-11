@@ -13,6 +13,8 @@
 #   E. a >1MB wake.log self-caps (truncate-then-append)
 #   F. SessionStart: truncates stale wake.log, restarts the watcher with the
 #      hook armed (on-message=ACTIVE), and emits the Monitor-arm instruction
+#   F2. a responder-role config flips the instruction's reply clause to an
+#      autonomous-reply grant (still walled off from destructive asks)
 #   G. SessionStart with source=compact/clear → NO arm instruction (monitors
 #      survive in-process; TaskList can't probe them, so never re-instruct)
 #   H. BEAMS_DISABLE_WATCH_ON_BOOT=1 → no watcher, no arm instruction
@@ -132,6 +134,7 @@ printf '%s' "$ctx" | grep -q  'Monitor'                   || fail "arm instructi
 printf '%s' "$ctx" | grep -qF "$ALICE_CFG/wake.log"       || fail "arm instruction missing the wake.log path"
 printf '%s' "$ctx" | grep -qF "tail -n 0 -F"              || fail "arm instruction missing the tail command"
 printf '%s' "$ctx" | grep -q  'persistent: true'          || fail "arm instruction missing persistent: true"
+printf '%s' "$ctx" | grep -q  'only if this session'      || fail "default (non-responder) reply clause missing"
 [ ! -s "$ALICE_CFG/wake.log" ] || fail "stale wake.log was not truncated at session start"
 
 # The restart is backgrounded — wait for the daemon, then check the hook is armed.
@@ -149,6 +152,20 @@ if [ -n "$wpid" ] && [ -r "/proc/$wpid/environ" ]; then
     || fail "daemon env does not reference lib/on-message.sh"
 fi
 pass "wake.log truncated; watcher restarted with the hook; Monitor instruction emitted"
+
+# ---------------------------------------------------------------------------
+banner "F2. responder role → the instruction grants autonomous replies"
+jq '.role = "responder"' "$ALICE_CFG/config.json" > "$ALICE_CFG/config.json.tmp" \
+  && mv "$ALICE_CFG/config.json.tmp" "$ALICE_CFG/config.json"
+out=$( unset BEAMS_DISABLE_WATCH_ON_BOOT
+       export CLAUDE_CODE_SESSION_ID=boot-sess CLAUDE_PLUGIN_ROOT="$PLUGIN"
+       printf '{"source":"startup"}' | bash "$PLUGIN/hooks/check-on-start.sh" 2>/dev/null ) || true
+ctx=$(printf '%s' "$out" | jq -r '.hookSpecificOutput.additionalContext // empty' 2>/dev/null) || ctx=""
+printf '%s' "$ctx" | grep -q 'RESPONDER' || fail "responder role did not grant autonomous replies"
+printf '%s' "$ctx" | grep -q 'destructive' || fail "responder grant lost its destructive-action wall"
+jq 'del(.role)' "$ALICE_CFG/config.json" > "$ALICE_CFG/config.json.tmp" \
+  && mv "$ALICE_CFG/config.json.tmp" "$ALICE_CFG/config.json"
+pass "responder role grants autonomous replies (with the destructive-ask wall)"
 
 # ---------------------------------------------------------------------------
 banner "G. source=compact/clear → no arm instruction (monitors survive in-process)"
