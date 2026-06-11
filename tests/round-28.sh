@@ -13,7 +13,8 @@
 #   E. a >1MB wake.log self-caps (truncate-then-append)
 #   F. SessionStart: truncates stale wake.log, restarts the watcher with the
 #      hook armed (on-message=ACTIVE), and emits the Monitor-arm instruction
-#   G. SessionStart with source=compact → NO arm instruction (monitors survive)
+#   G. SessionStart with source=compact/clear → NO arm instruction (monitors
+#      survive in-process; TaskList can't probe them, so never re-instruct)
 #   H. BEAMS_DISABLE_WATCH_ON_BOOT=1 → no watcher, no arm instruction
 #   I. end to end: real send → watcher poll → dispatch → wake.log line
 
@@ -150,28 +151,35 @@ fi
 pass "wake.log truncated; watcher restarted with the hook; Monitor instruction emitted"
 
 # ---------------------------------------------------------------------------
-banner "G. source=compact → no arm instruction (monitors survive compaction)"
-out=$( unset BEAMS_DISABLE_WATCH_ON_BOOT
-       export CLAUDE_CODE_SESSION_ID=boot-sess CLAUDE_PLUGIN_ROOT="$PLUGIN"
-       printf '{"source":"compact"}' | bash "$PLUGIN/hooks/check-on-start.sh" 2>/dev/null ) || true
-ctx=$(printf '%s' "$out" | jq -r '.hookSpecificOutput.additionalContext // empty' 2>/dev/null) || ctx=""
-printf '%s' "$ctx" | grep -q 'beams doorbell' && fail "compact re-emitted the arm instruction" || true
-pass "compact: instruction suppressed"
+banner "G. source=compact/clear → no arm instruction (monitors survive in-process)"
+for src in compact clear; do
+  out=$( unset BEAMS_DISABLE_WATCH_ON_BOOT
+         export CLAUDE_CODE_SESSION_ID=boot-sess CLAUDE_PLUGIN_ROOT="$PLUGIN"
+         printf '{"source":"%s"}' "$src" | bash "$PLUGIN/hooks/check-on-start.sh" 2>/dev/null ) || true
+  ctx=$(printf '%s' "$out" | jq -r '.hookSpecificOutput.additionalContext // empty' 2>/dev/null) || ctx=""
+  printf '%s' "$ctx" | grep -q 'beams doorbell' && fail "$src re-emitted the arm instruction" || true
+done
+pass "compact + clear: instruction suppressed (no duplicate doorbells)"
 
-# Let G's backgrounded restart settle before stopping: wait for a live pid
-# DIFFERENT from F's daemon ($wpid) — breaking on any live pid could catch F's
-# not-yet-bounced daemon, and G's restart would then respawn one right after
-# our stop, which H would mis-read as "opt-out started a watcher". (The cat is
+# G queued TWO async watcher bounces (compact + clear). Waiting for any one
+# new pid is raceable — a still-in-flight restart can spawn a daemon right
+# after our stop, which H would mis-read as "opt-out started a watcher".
+# Drain instead: keep stopping whatever live daemon appears until the
+# population stays quiet for 2 consecutive seconds (or 30s cap). (The cat is
 # `|| p=""`-guarded: mid-bounce the pid file does not exist, and an unmatched
 # glob + pipefail would otherwise kill the whole script under set -e.)
-i=0
-while [ "$i" -lt 50 ]; do
+quiet=0; t=0
+while [ "$quiet" -lt 4 ] && [ "$t" -lt 60 ]; do
   p=$(cat "$ALICE_CFG"/state/*/watcher.pid 2>/dev/null | head -1) || p=""
   case "$p" in ''|*[!0-9]*) p="" ;; esac
-  if [ -n "$p" ] && [ "$p" != "$wpid" ] && kill -0 "$p" 2>/dev/null; then break; fi
-  sleep 0.3; i=$((i+1))
+  if [ -n "$p" ] && kill -0 "$p" 2>/dev/null; then
+    run_as "$ALICE_CFG" watch stop >/dev/null 2>&1 || true
+    quiet=0
+  else
+    quiet=$((quiet+1))
+  fi
+  sleep 0.5; t=$((t+1))
 done
-run_as "$ALICE_CFG" watch stop >/dev/null 2>&1 || true
 
 # ---------------------------------------------------------------------------
 banner "H. BEAMS_DISABLE_WATCH_ON_BOOT=1 → no watcher, no instruction"

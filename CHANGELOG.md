@@ -15,7 +15,7 @@ The real-time doorbell becomes a stock feature: a new beam wakes an idle session
 ### Changed
 
 - **SessionStart now `restart`s the watcher instead of idempotently `start`ing it,** so a daemon that survived a plugin upgrade is re-armed with the current hook instead of running a stale environment forever. The bounce is loss-free (the notify cursor lives on disk). A manual `--on-message` customization no longer survives a session start — set `react.watch_on_boot: false` and manage the watcher yourself if you need a custom hook to stick.
-- **`hooks/check-on-start.sh` now reads the SessionStart JSON** (previously drained) to gate the doorbell-arm instruction on `source`: `compact` is skipped because monitors survive compaction; `startup`/`resume`/`clear` (re)emit it with a check-before-arm guard.
+- **`hooks/check-on-start.sh` now reads the SessionStart JSON** (previously drained) to gate the doorbell-arm instruction on `source`: only a fresh process (`startup`/`resume`, or no source on older harnesses) is asked to arm. `clear` and `compact` keep the process — and its monitors — alive, and a live monitor can't be probed from the model side (TaskList doesn't list Monitor tasks; verified live), so re-emitting there would arm duplicate doorbells that ring double per message.
 
 ### Removed
 

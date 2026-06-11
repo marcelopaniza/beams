@@ -150,25 +150,29 @@ __hook_in=$(cat 2>/dev/null) || __hook_in=""
     __doorbell=1
   fi
 
-  # Ask the session to arm the doorbell Monitor. Emitted whenever the watcher
-  # was armed, EXCEPT after a compaction — monitors are background tasks and
-  # survive those, so re-instructing would only breed duplicates. startup and
-  # resume get a fresh process (no monitors yet); /clear may or may not have
-  # kept them — every emission tells the model to check before arming.
+  # Ask the session to arm the doorbell Monitor. Emitted only for a FRESH
+  # process — source startup/resume (or absent, on older harnesses) — where no
+  # monitor can pre-exist. clear and compact keep the process (and its
+  # monitors) alive, and the model has no reliable probe for a live monitor
+  # (TaskList does not list Monitor tasks — verified live), so re-emitting
+  # there would breed duplicate doorbells ringing double per message: skip both.
   wake_note=""
   if [ "${__doorbell:-}" = "1" ]; then
     __hook_src=$(printf '%s' "${__hook_in:-}" | jq -r '.source // empty' 2>/dev/null) || __hook_src=""
-    if [ "$__hook_src" != "compact" ]; then
-      __nm=""
-      beams::config_exists && __nm=$(beams::config_get '.session_name' 2>/dev/null)
-      [ -n "$__nm" ] || __nm="unnamed"
-      wake_note="beams doorbell: this identity's real-time wake events land in ${BEAMS_CONFIG_DIR}/wake.log (a background watcher appends one line per new beam message). To be woken the moment a message arrives — even while sitting idle — arm the doorbell now, exactly once per session: if an active background task named 'beams doorbell' already exists (check TaskList), do nothing; otherwise call the Monitor tool with exactly these arguments:
+    case "$__hook_src" in
+      clear|compact) : ;;
+      *)
+        __nm=""
+        beams::config_exists && __nm=$(beams::config_get '.session_name' 2>/dev/null)
+        [ -n "$__nm" ] || __nm="unnamed"
+        wake_note="beams doorbell: this identity's real-time wake events land in ${BEAMS_CONFIG_DIR}/wake.log (a background watcher appends one line per new beam message). To be woken the moment a message arrives — even while sitting idle — arm the doorbell now: ONE Monitor tool call, exactly once per session, with exactly these arguments:
   description: beams doorbell (${__nm})
   command: tail -n 0 -F '${BEAMS_CONFIG_DIR}/wake.log'
   persistent: true
   timeout_ms: 3600000
-Each event line the monitor emits is a new beam message (sender + preview). When one arrives: run /beams:read to fetch the full message, surface it to the user (who it's from + a short summary), and reply on the beam only if this session's role/instructions call for autonomous replies. Keep the monitor running for the whole session — do not stop it after an event. If the Monitor tool is unavailable in this harness, skip this; messages still arrive on your next prompt."
-    fi
+Each event line the monitor emits is a new beam message (sender + preview). When one arrives: run /beams:read to fetch the full message, surface it to the user (who it's from + a short summary), and reply on the beam only if this session's role/instructions call for autonomous replies. Keep the monitor running for the whole session — do not stop it after an event, and never arm a second doorbell monitor. If the Monitor tool is unavailable in this harness, skip this; messages still arrive on your next prompt."
+        ;;
+    esac
   fi
 
   # Emit one SessionStart payload carrying whatever applies:
