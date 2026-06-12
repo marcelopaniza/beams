@@ -4,6 +4,20 @@ All notable changes are documented here. Format follows [Keep a Changelog](https
 
 > **Lineage.** Beams is the proactive/reactive fork of [buses](https://github.com/marcelopaniza/buses) — a pure-bash cross-terminal messenger. Beams begins at **0.9.0** and inherits buses' version history below (entries at 0.8.1 and earlier were released as *buses*; the API and on-disk format are shared, the names are not — Beams uses its own `~/.config/beams` and `<shared>/beams/` namespace). The 0.9.0 entry is Beams' first release: the proactive-delivery layer that buses deliberately does not carry.
 
+## [Unreleased]
+
+### Added
+
+- **Joining arms the doorbell in the same session — no restart needed.** `/beams:join`, `/beams:name` (a mid-session bind like "join beams as `<name>`"), and a profile `init` now call `beams::doorbell_autostart`: the watcher daemon is started armed with the wake-file hook (idempotent `start` — a healthy daemon, or one carrying a custom `--on-message`, is left alone), and the Monitor-arm instruction is printed into the command output for the model to follow. Previously all of this only happened at the next SessionStart, so the very session that ran `/beams:start` stayed pull-only until a restart. Duplicate-doorbell guard: the instruction is suppressed whenever a live process already tails `wake.log` (`fuser`/`lsof` open-reader probe) — which is exactly the state after a `/clear`, where the process keeps its monitors but loses the context — and outside Claude Code (no Monitor tool there; the watcher still starts for cross-CLI setups). Same opt-outs as boot (`react.watch_on_boot: false` / `BEAMS_DISABLE_WATCH_ON_BOOT=1`). The instruction text now lives in one place (`beams::doorbell_instruction` in `lib/common.sh`), shared by the SessionStart hook and the mid-session arm so the two can't drift. The wizard's Step 4 notification question is gone — nothing left to ask. New `tests/round-29.sh`.
+
+- **`/beams:status` now shows doorbell ground truth.** A new `doorbell:` line reports `armed (wake.log reader pid N)` or `NOT armed — …re-offer…` using the same open-reader probe (`beams::doorbell_reader`, fuser/lsof) the mid-session arm uses — so "is the bell actually live?" is one command instead of guesswork.
+
+- **One-question setup.** The `/beams:start` fast path now proposes a terminal name itself (project folder or short hostname), so default setup is a single "yes". The wizard's old Step-4 notifications question is gone (joining arms the watcher + doorbell automatically). New README banner for the doorbell (`assets/beams-doorbell.jpg`, art by Codex imagegen; overlay source `assets/beams-doorbell.html`).
+
+### Fixed
+
+- **`init --profile <name>` died with "failed to set role from preset" under session-id resolution** — i.e. for the documented one-command responder bootstrap typed into a real Claude Code session. The preset's `name.sh` call migrates the session's scratch config into the durable identity, but `init.sh` kept pointing at the moved-away scratch path, so the role write (and everything after it) failed under `set -e`. `init.sh` now re-resolves its config globals to the bound identity after the preset name step. (Configs pinned via an explicit `BEAMS_CONFIG_DIR` — including all pre-existing tests — never migrated and were unaffected, which is how this shipped unseen.) Covered by `tests/round-29.sh` case F.
+
 ## [0.11.0] — 2026-06-10
 
 The real-time doorbell becomes a stock feature: a new beam wakes an idle session with no dev flags, no server, and no setup — on by default for every session. The experimental channel transport it replaces is retired.

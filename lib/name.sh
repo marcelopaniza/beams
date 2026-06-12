@@ -39,8 +39,17 @@ if [ -n "$BEAMS_CONFIG_DIR_EXPLICIT" ] \
   done < <(jq -r '.beams[]?' "$BEAMS_CONFIG_FILE")
   beams::lease_refresh
   printf 'beams: session name set to "%s"\n' "$new"
+  # Re-offer the doorbell (no-op when one already tails wake.log): a rename is
+  # also the natural "wake this identity up" moment after a missed boot arm.
+  beams::doorbell_autostart
   exit 0
 fi
 
 # Unbound, switching identity, or fresh → bind (handles rebind / create / migrate).
 beams::bind_session $force "$new"
+
+# Arm the real-time doorbell in THIS session (watcher + Monitor instruction):
+# a mid-session bind — "join beams as <name>" after the SessionStart hook came
+# up unbound — would otherwise stay doorbell-less until the next restart. The
+# open-reader probe inside keeps a /clear-surviving monitor from being doubled.
+beams::doorbell_autostart

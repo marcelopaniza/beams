@@ -52,3 +52,7 @@ beams::write_member_record "$beam"
 # the beam was created by an older plugin version with looser default perms.
 beams::tighten_perms "$beam"
 printf 'beams: joined "%s" (history before now is hidden — use /beams:read --all to see past messages)\n' "$beam"
+
+# Arm the real-time doorbell in THIS session (watcher + Monitor instruction),
+# so a first-time setup doesn't wait for the next restart to go real-time.
+beams::doorbell_autostart

@@ -22,20 +22,20 @@ test -f "${BEAMS_CONFIG_DIR:-${HOME}/.config/beams/sessions/${CLAUDE_CODE_SESSIO
 
 ## Step 1 — Offer the fast path first
 
-Most setups are one machine running several terminals off a shared local folder. Offer that before asking anything else:
+Most setups are one machine running several terminals off a shared local folder. Make the offer a single yes-able question: pick a name suggestion yourself first (silently) — the project folder's basename if it's distinctive, else the machine's short hostname (`hostname -s`) — then ask:
 
-> Want me to set this up with defaults — local folder `~/beams-share`, joined to the `all` beam? I just need a name for this terminal. (Say so instead if you're **joining** a setup another machine already has, or need **multiple machines** to share one beam.)
+> Want me to set this up with defaults — local folder `~/beams-share`, joined to the `all` beam, this terminal named **`<suggestion>`**? One "yes" and you're done. (Or give me a different name — or say so if you're **joining** a setup another machine already has, or need **multiple machines** to share one beam.)
 
-- **They accept** → ask only for the name, then run:
+- **They accept (or give a name)** → run:
   ```bash
   mkdir -p ~/beams-share
   ```
   ```
   /beams:admin init ~/beams-share
-  /beams:name <their-name>
+  /beams:name <the-name>
   /beams:join all
   ```
-  Skip to Step 4. That's the whole setup in one question.
+  Skip to Step 4. That's the whole setup in one question. (If `/beams:name` refuses because the name is held by another live session, ask for a different one — don't `--force`.)
 - **They want a different local path** → same three commands, swap the path (`mkdir -p` it first).
 - **They're joining an existing setup, or need multiple machines** → Step 2.
 
@@ -94,16 +94,10 @@ It auto-creates if missing (the creator becomes driver). Messages addressed to t
 
 ---
 
-## Step 4 — Notifications, then done
+## Step 4 — Recap, then done
 
-> Want desktop notifications for new messages? It's a background daemon — zero token cost. [Y/n]
+Nothing to ask here — joining armed everything: the background watcher (desktop notifications + the real-time wake feed, zero tokens) starts automatically, and if the join printed a "beams doorbell" block you already followed it and armed the Monitor.
 
-If yes:
-
-```
-/beams:watch start 5
-```
-
-Finish with `/beams:status` and a one-line recap: this terminal's name, the beam it joined, and the watcher state. Every *other* terminal joins the same way — run `/beams:start` there too; each gets its own identity automatically.
+Finish with `/beams:status` and a one-line recap: this terminal's name, the beam it joined, and that new messages arrive in real time (doorbell) with desktop pings — or at the next prompt, worst case. Mention the off switch once: `/beams:watch stop` for now, `react.watch_on_boot: false` in the config to stay off. Every *other* terminal joins the same way — run `/beams:start` there too; each gets its own identity automatically.
 
 Stop there — let the user drive.

@@ -96,6 +96,18 @@ if [ -n "$profile" ]; then
 
   if [ -n "$default_name" ]; then
     "$lib_dir/name.sh" "$default_name" >/dev/null
+    # Under session-id resolution, that name.sh just MIGRATED this session's
+    # scratch config into the durable identity (sessions/<sid> →
+    # projects/<p>/identities/<name>) — and a child process can't reassign our
+    # globals. Re-point them so the role/react/auto-subscribe steps below edit
+    # the real config, not the moved-away scratch path (which made every
+    # profile init die at "failed to set role"). A still-valid config (explicit
+    # BEAMS_CONFIG_DIR, or a plain rename with no migration) is left alone.
+    if ! beams::config_exists; then
+      BEAMS_CONFIG_DIR="$(beams::identities_dir)/$(beams::_safe_key "$default_name")"
+      BEAMS_CONFIG_FILE="$BEAMS_CONFIG_DIR/config.json"
+      BEAMS_IDENTITY_KEY="$BEAMS_CONFIG_DIR/identity.key"
+    fi
   fi
 
   if [ -n "$role" ]; then
@@ -155,3 +167,11 @@ next steps:
   /beams:admin create <beam>             make a new beam, or
   /beams:join <existing-beam>      subscribe to one
 EOF
+
+# A profile that auto-subscribed ran its name.sh/join.sh calls with output
+# swallowed — which also swallowed their doorbell-arm instruction. Re-emit it
+# here, after the summary, where the model can see and follow it. (Bare init
+# stays silent: name/join come next and each arms the doorbell itself.)
+if [ -n "$profile" ] && [ "${joined_count:-0}" -gt 0 ]; then
+  beams::doorbell_autostart
+fi

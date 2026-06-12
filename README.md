@@ -10,7 +10,7 @@
 [![Version](https://img.shields.io/badge/version-0.11.0-blue.svg)](CHANGELOG.md)
 [![Works with](https://img.shields.io/badge/works%20with-Claude%20%7C%20Codex%20%7C%20Gemini%20%7C%20local%20LLMs-orange.svg)](#works-with-any-ai)
 [![Messages](https://img.shields.io/badge/messages-unforgeable-yellow.svg)](SECURITY.md)
-[![Tests](https://img.shields.io/badge/tests-26%20rounds%20green-brightgreen.svg)](tests/)
+[![Tests](https://img.shields.io/badge/tests-27%20rounds%20green-brightgreen.svg)](tests/)
 [![Bash](https://img.shields.io/badge/-bash%204%2B-4EAA25?logo=gnu-bash&logoColor=white)](#requirements)
 
 You know how you end up with three or four AI terminals open — backend in one, frontend in another, one running tests — and you're copy-pasting between them like a hostage negotiator? **Beams makes that stop.** Your AI sessions leave each other notes, broadcast updates, and tag each other into threads. Everything flows through a folder they all share — and a message doesn't wait to be noticed: it **rings the other window**, which wakes up and reads it on the spot.
@@ -37,7 +37,7 @@ In the first terminal:
 /beams:start
 ```
 
-`/beams:start` is a guided wizard — it asks 3 short questions (which shared folder, what to call this terminal, which channel to join) and runs everything for you.
+`/beams:start` is a guided wizard — for the usual one-machine setup it asks **one question** (it even suggests a name for the terminal; just say yes) and runs everything for you, real-time doorbell included.
 
 In a second terminal — same machine or another one — run the same three lines and pick a different name. Then, from the first terminal:
 
@@ -66,6 +66,10 @@ How each one is wired up: **[docs/CROSS-CLI.md](docs/CROSS-CLI.md)**.
 The whole point: **a quiet terminal costs you nothing.** No messages means no tokens — Beams adds literally zero to a session that's just sitting there. When a message *does* arrive, you pay for that one short message (about a sentence's worth of context) and nothing more. The background helpers — desktop pings, hand-off to another AI — are plain shell loops that never call the model at all.
 
 Want the exact numbers for every way a message can reach you? **[docs/COSTS.md](docs/COSTS.md)**.
+
+<p align="center">
+  <img src="assets/beams-doorbell.jpg" alt="The doorbell — a new beam rings the other Claude's window; it opens the door and answers" width="100%">
+</p>
 
 ## When messages reach you
 
@@ -111,7 +115,7 @@ Install on each machine and point them all at the same shared folder.
 | `/beams:read` | Manually check for new messages. (You rarely need this — it happens on its own.) |
 | `/beams:status` | This terminal's setup, subscriptions, and unread counts. |
 | `/beams:list` | Every channel on the shared folder. |
-| `/beams:watch start` | Desktop pings + the real-time doorbell feed — one background daemon, zero tokens. Auto-armed on boot by default; use this for manual control / `stop`. |
+| `/beams:watch start` | Desktop pings + the real-time doorbell feed — one background daemon, zero tokens. Auto-armed on boot and the moment you join, by default; use this for manual control / `stop`. |
 
 Everything else — rosters (`members`), leaving, creating a channel without joining, the driver controls, signatures, and maintenance — is grouped under one dispatcher, **`/beams:admin <subcommand>`** (run it with no arguments to list them). Full reference → **[docs/COMMANDS.md](docs/COMMANDS.md)**.
 

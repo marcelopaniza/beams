@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Round 6: pre-read validation gate + directory permission tightening.
 set -euo pipefail
+export BEAMS_DISABLE_WATCH_ON_BOOT=1  # hermetic: join/name/init must not autostart watchers in this round
 
 PLUGIN="${PLUGIN_ROOT:-$(cd "$(dirname "$0")/.." && pwd)}"
 TMPDIR=$(mktemp -d /tmp/beams-test6.XXXXXX)

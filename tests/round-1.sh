@@ -2,6 +2,7 @@
 # End-to-end smoke test for the beams plugin.
 # Simulates two sessions (A and B) on a single machine using two distinct config dirs.
 set -euo pipefail
+export BEAMS_DISABLE_WATCH_ON_BOOT=1  # hermetic: join/name/init must not autostart watchers in this round
 
 PLUGIN="${PLUGIN_ROOT:-$(cd "$(dirname "$0")/.." && pwd)}"
 TMPDIR=$(mktemp -d /tmp/beams-test.XXXXXX)

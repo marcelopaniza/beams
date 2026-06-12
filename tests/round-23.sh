@@ -19,6 +19,7 @@
 #      pinned sender
 
 set -euo pipefail
+export BEAMS_DISABLE_WATCH_ON_BOOT=1  # hermetic: join/name/init must not autostart watchers in this round
 
 PLUGIN="${PLUGIN_ROOT:-$(cd "$(dirname "$0")/.." && pwd)}"
 TMP=$(mktemp -d /tmp/beams-test-r23.XXXXXX)

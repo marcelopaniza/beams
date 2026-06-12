@@ -15,10 +15,14 @@ export PLUGIN_ROOT
 # XDG_CONFIG_HOME override this inside their own process.
 export XDG_CONFIG_HOME="$(mktemp -d "${TMPDIR:-/tmp}/beams-runall-xdg.XXXXXX")"
 trap 'rm -rf "$XDG_CONFIG_HOME"' EXIT
+# Hermetic default for the whole run: the mid-session doorbell autostart
+# (join/name/init) must not spawn real watchers inside rounds that aren't
+# testing it. Rounds that ARE (28, 29) re-enable it in their own subshells.
+export BEAMS_DISABLE_WATCH_ON_BOOT=1
 ROUNDS=("$@")
 # 21 and 27 tested the retired channel-server transport (removed in 0.11.0 —
 # the Monitor wake-file doorbell replaced it; round 28 covers that).
-[ "${#ROUNDS[@]}" -eq 0 ] && ROUNDS=(1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 22 23 24 25 26 28)
+[ "${#ROUNDS[@]}" -eq 0 ] && ROUNDS=(1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 22 23 24 25 26 28 29)
 
 red()   { printf '\033[31m%s\033[0m\n' "$*"; }
 green() { printf '\033[32m%s\033[0m\n' "$*"; }

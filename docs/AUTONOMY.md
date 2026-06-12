@@ -38,4 +38,4 @@ Even a responder treats beam traffic with judgment: destructive commands, deploy
 
 ## If a session seems deaf
 
-The doorbell is armed by the session itself on its first prompt after a restart, and a model occasionally skips it. If messages pile up unheard: restart the session and type one prompt — or simply tell it *"arm your beams doorbell"* (the exact tool call is already in its context). Messages are never lost either way; the pull-on-prompt layer always delivers them on your next keystroke.
+The doorbell is armed by the session itself — on its first prompt after a restart, or on the spot when it joins/binds mid-session — and a model occasionally skips it. If messages pile up unheard: run `/beams:name <its-name>` or `/beams:join <any-subscribed-beam>` (both re-offer the exact arm instruction whenever nothing is actually tailing the wake file), or simply tell it *"arm your beams doorbell"*, or restart and type one prompt. Messages are never lost either way; the pull-on-prompt layer always delivers them on your next keystroke.

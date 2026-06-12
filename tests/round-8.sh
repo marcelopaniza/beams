@@ -8,6 +8,7 @@
 #   - per-beam require_signatures policy
 #   - watcher start mkdir-lock (concurrent starts serialise)
 set -euo pipefail
+export BEAMS_DISABLE_WATCH_ON_BOOT=1  # hermetic: join/name/init must not autostart watchers in this round
 
 PLUGIN="${PLUGIN_ROOT:-$(cd "$(dirname "$0")/.." && pwd)}"
 TMPDIR=$(mktemp -d /tmp/beams-test8.XXXXXX)

@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Round 7: Ed25519 signing — keys, sign/verify, forgery defence, tamper detection.
 set -euo pipefail
+export BEAMS_DISABLE_WATCH_ON_BOOT=1  # hermetic: join/name/init must not autostart watchers in this round
 
 PLUGIN="${PLUGIN_ROOT:-$(cd "$(dirname "$0")/.." && pwd)}"
 TMPDIR=$(mktemp -d /tmp/beams-test7.XXXXXX)

@@ -11,4 +11,6 @@ BEAMS_END_PAYLOAD_3f5a8c2d1b9e7f0a
 )"
 ```
 
-Confirm the new name in one short line.
+If the output contains a "beams doorbell" block, follow it FIRST: arm the Monitor with exactly the arguments it gives (one call — skip if this session already armed a beams doorbell monitor).
+
+Then confirm the new name in one short line.

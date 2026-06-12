@@ -47,6 +47,16 @@ else
     printf '  bound:        (unbound — run /beams:name <name> to bind this terminal)\n'
   fi
 fi
+# Real-time doorbell: ground truth via the open-reader probe — an armed
+# Monitor's `tail -F` holds wake.log open; nothing else does.
+reader=$(beams::doorbell_reader || true)
+if [ -n "$reader" ]; then
+  printf '  doorbell:     armed (wake.log reader pid %s)\n' "$reader"
+elif [ -n "$cc_sid" ]; then
+  printf '  doorbell:     NOT armed — run /beams:name %s (or /beams:join <beam>) to re-offer the arm instruction\n' "$([ "$name" != '(unset)' ] && printf '%s' "$name" || printf '<name>')"
+else
+  printf '  doorbell:     not armed (no Claude session here — watcher/pull delivery only)\n'
+fi
 printf '  fingerprint:  %s\n' "$(beams::fingerprint || echo '(no key yet)')"
 printf '  created:      %s\n' "$created"
 printf '\n  subscriptions:\n'

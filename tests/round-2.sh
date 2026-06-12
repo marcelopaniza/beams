@@ -2,6 +2,7 @@
 # Round 2: tests for manager privileges (lock/unlock/kick/unkick) and the
 # watcher daemon (with stub notifier). Self-contained — uses fresh tmpdir.
 set -euo pipefail
+export BEAMS_DISABLE_WATCH_ON_BOOT=1  # hermetic: join/name/init must not autostart watchers in this round
 
 PLUGIN="${PLUGIN_ROOT:-$(cd "$(dirname "$0")/.." && pwd)}"
 TMPDIR=$(mktemp -d /tmp/beams-test2.XXXXXX)
