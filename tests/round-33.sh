@@ -124,13 +124,42 @@ sum_n() {   # sum_n <received-log> — total N summed across every "beams doorbe
     || true
 }
 
-wait_total() {     # wait_total <received-log> <want> — poll (~12s) until sum_n >= want
+wait_total() {     # wait_total <received-log> <want> — poll (~40s) until sum_n >= want
+                   # Budget deliberately generous: this asserts WHETHER a wake is
+                   # delivered, never how fast. Three daemons at a 1s interval,
+                   # each verifying signatures with openssl, share this host with
+                   # whatever else is running — a full suite, or another copy of
+                   # this round — and a 12s budget turned that load into a
+                   # "never delivered" failure.
   local recv="$1" want="$2" i=0
-  while [ "$i" -lt 60 ]; do
+  while [ "$i" -lt 200 ]; do
     [ "$(sum_n "$recv")" -ge "$want" ] && return 0
     sleep 0.2; i=$((i + 1))
   done
   return 1
+}
+
+settle_total() {   # settle_total <received-log> — echo sum_n once it stops moving
+                   # (3 consecutive quiet half-seconds, ~20s cap).
+                   # "Sleep 2 then look" cannot tell a duplicate post from a
+                   # single one that was merely slow: on a loaded host the second
+                   # of two legitimate wakes can land just after that window and
+                   # read as an extra. Waiting for the total to stand still judges
+                   # the settled number instead — a genuine second post for the
+                   # same message still shows up, as a total one higher than the
+                   # messages sent.
+  local recv="$1" last="" cur quiet=0 i=0
+  while [ "$i" -lt 40 ]; do
+    cur=$(sum_n "$recv")
+    if [ "$cur" = "$last" ]; then quiet=$((quiet + 1)); else quiet=0; fi
+    [ "$quiet" -ge 6 ] && break
+    last="$cur"; sleep 0.5; i=$((i + 1))
+  done
+  sum_n "$recv"
+}
+
+show_recv() {      # show_recv <label> <token> <received-log> — redacted dump
+  red "  $1 received:"; sed "s/$2/<tok>/" "$3" 2>/dev/null | sed 's/^/    /' || true
 }
 
 # --- the fake session inbox (same AF_UNIX listener shape as tests/round-32.sh) ---
@@ -229,15 +258,15 @@ run_as "$CFG_DAVE" join "$BEAM"   >/dev/null
 banner "1/2. one send to bob only, one to alice only, one to all, one @-mention for carol"
 
 # Send BEFORE any watcher daemon exists, so all four are fully written and
-# stable on disk before anything ever polls the beam. check.sh's cursor
-# advance takes a live `ls -1t` snapshot of the directory whenever a poll's
-# candidate set is fully processed (lib/check.sh's advance_cursors_for_beam,
-# used whenever plan_kinds is "full" — the common case here), not one bounded
-# by what `find -newer cursor` actually captured earlier in that same
-# invocation; a message written in that gap can be skipped forever. Sending
-# the whole batch first — no daemon yet to poll mid-write — removes that
-# window for this part of the test entirely (see the round's PASS/report for
-# the suspected product bug this uncovered).
+# stable on disk before anything ever polls the beam — this part of the test is
+# about WHO each message reaches, and it should not also be re-testing the
+# mid-write poll window. (An earlier draft of this round blamed a live `ls -1t`
+# re-listing in lib/check.sh's advance_cursors_for_beam; that is not what the
+# code does — it advances only to the newest file the scan itself passed, and
+# carries a tie file of the names consumed at that mtime precisely so a
+# same-second message is neither skipped nor handed back. What remains is the
+# ordinary hazard of a scan that straddles a write, which case 4 tolerates
+# explicitly.)
 run_as "$CFG_DAVE" send "$BEAM" bob    "for bob's eyes only"           >/dev/null
 run_as "$CFG_DAVE" send "$BEAM" alice  "for alice's eyes only"         >/dev/null
 run_as "$CFG_DAVE" send "$BEAM" all    "broadcast to the whole beam"   >/dev/null
@@ -254,10 +283,12 @@ pass "each identity has its own watcher daemon running"
 wait_total "$RECV_ALICE" 2 || { red "  alice received:"; sed "s/$TOK_ALICE/<tok>/" "$RECV_ALICE" | sed 's/^/    /'; fail "alice's socket never reached a total of 2"; }
 wait_total "$RECV_BOB"   2 || { red "  bob received:";   sed "s/$TOK_BOB/<tok>/"   "$RECV_BOB"   | sed 's/^/    /'; fail "bob's socket never reached a total of 2"; }
 wait_total "$RECV_CAROL" 2 || { red "  carol received:"; sed "s/$TOK_CAROL/<tok>/" "$RECV_CAROL" | sed 's/^/    /'; fail "carol's socket never reached a total of 2"; }
-sleep 2   # give a would-be extra/duplicate/misdirected post time to land
-[ "$(sum_n "$RECV_ALICE")" = 2 ] || fail "alice's socket total should be exactly 2 (direct + all), got $(sum_n "$RECV_ALICE")"
-[ "$(sum_n "$RECV_BOB")"   = 2 ] || fail "bob's socket total should be exactly 2 (direct + all), got $(sum_n "$RECV_BOB")"
-[ "$(sum_n "$RECV_CAROL")" = 2 ] || fail "carol's socket total should be exactly 2 (all + @-mention), got $(sum_n "$RECV_CAROL")"
+# Judge each total once it has stopped moving, not after a fixed pause — and dump
+# the redacted frames on a mismatch, so an unexpected count is diagnosable.
+A_TOT=$(settle_total "$RECV_ALICE"); B_TOT=$(settle_total "$RECV_BOB"); C_TOT=$(settle_total "$RECV_CAROL")
+[ "$A_TOT" = 2 ] || { show_recv alice "$TOK_ALICE" "$RECV_ALICE"; fail "alice's socket total should be exactly 2 (direct + all), got $A_TOT"; }
+[ "$B_TOT" = 2 ] || { show_recv bob   "$TOK_BOB"   "$RECV_BOB";   fail "bob's socket total should be exactly 2 (direct + all), got $B_TOT"; }
+[ "$C_TOT" = 2 ] || { show_recv carol "$TOK_CAROL" "$RECV_CAROL"; fail "carol's socket total should be exactly 2 (all + @-mention), got $C_TOT"; }
 pass "each socket's total matches exactly what was addressed to it (batched or not); nothing crossed over"
 
 # ---------------------------------------------------------------------------
@@ -284,14 +315,12 @@ boot "$P_BOB" sess-bob-2 "$SOCK_BOB" "$TOK_BOB" >/dev/null
   || fail "bob's pointer did not update to the new session id"
 pass "bob stayed bound to 'bob'; one pointer file, still naming the same socket"
 
-# A further message must reach bob's socket exactly once more. Unlike the
-# batch above, bob's daemon is already live and polling right through this
-# send, so it can in principle hit the same check.sh cursor-advance race
-# noted above (a rare poll whose scan straddles the write). Retry with a
-# fresh message — bumping the expected total to match — rather than assume
-# a single send always lands; this does not weaken the assertion, it just
-# tolerates a known, unrelated host-timing hazard while still requiring
-# exactly one post per attempt that actually got through.
+# A further message must reach bob's socket exactly once more. Unlike the batch
+# above, bob's daemon is already live and polling right through this send, so a
+# poll whose scan straddles the write can miss it for that cycle. Retry with a
+# fresh message — bumping the expected total to match — rather than assume a
+# single send always lands; this does not weaken the assertion, it still requires
+# exactly one post per attempt that got through, judged once the total settles.
 bob_want=2
 ok=0
 for attempt in 1 2 3; do
@@ -300,10 +329,12 @@ for attempt in 1 2 3; do
   if wait_total "$RECV_BOB" "$bob_want"; then ok=1; break; fi
 done
 [ "$ok" = 1 ] || fail "the post-rotation message never reached bob's socket after $attempt attempt(s)"
-sleep 2
-[ "$(sum_n "$RECV_BOB")"   = "$bob_want" ] || fail "bob's socket should total exactly $bob_want, got $(sum_n "$RECV_BOB") (posted more than once)"
-[ "$(sum_n "$RECV_ALICE")" = 2 ] || fail "alice's total changed after a bob-only send: $(sum_n "$RECV_ALICE")"
-[ "$(sum_n "$RECV_CAROL")" = 2 ] || fail "carol's total changed after a bob-only send: $(sum_n "$RECV_CAROL")"
+B_TOT=$(settle_total "$RECV_BOB")
+[ "$B_TOT" = "$bob_want" ] || { show_recv bob "$TOK_BOB" "$RECV_BOB"
+  red "  bob's watcher.log:"; tail -n 15 "$BOB"/state/*/watcher.log 2>/dev/null | sed 's/^/    /' || true
+  fail "bob's socket should total exactly $bob_want, got $B_TOT (posted more than once)"; }
+[ "$(settle_total "$RECV_ALICE")" = 2 ] || fail "alice's total changed after a bob-only send: $(sum_n "$RECV_ALICE")"
+[ "$(settle_total "$RECV_CAROL")" = 2 ] || fail "carol's total changed after a bob-only send: $(sum_n "$RECV_CAROL")"
 pass "the post-rotation message posted to bob's socket exactly once per attempt ($attempt attempt(s) needed); alice/carol untouched"
 
 # ---------------------------------------------------------------------------
