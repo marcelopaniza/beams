@@ -127,6 +127,22 @@ cmd_start() {
   # shellcheck disable=SC2064
   trap "rmdir '$lock_dir' 2>/dev/null || true" EXIT
 
+  # Native doorbell transport: publish this session's inbox pointer so the daemon
+  # posts each wake batch straight into the socket (beams::inbox_publish). A
+  # `/beams:watch start` runs from the command's `!` block, i.e. inside a live
+  # session, which is the only place CLAUDE_CODE_MESSAGING_SOCKET/_TOKEN exist —
+  # so this is the manual route to native delivery for a session the SessionStart
+  # hook could not cover: one that opted out of watch_on_boot, or that created
+  # its identity after boot. Anywhere else — a plain shell, an older harness, or
+  # any caller that pinned BEAMS_CONFIG_DIR to an identity of its choosing (the
+  # ownership rule in inbox_publish) — it returns 1 and publishes nothing,
+  # including the hook-spawned restart, which has just published anyway.
+  # Never allowed to change what `start` prints
+  # or exits with — the doorbell is a side benefit of starting the watcher, not
+  # its contract. Before the is_alive return on purpose: a daemon another session
+  # already started needs the pointer just as much.
+  beams::inbox_publish 2>/dev/null || true
+
   if is_alive; then
     local running_interval='?'
     [ -f "$interval_file" ] && running_interval=$(cat "$interval_file" 2>/dev/null)
@@ -149,7 +165,14 @@ cmd_start() {
   else
     unset BEAMS_ON_MESSAGE_CMD
   fi
-  nohup bash "$PLUGIN_ROOT/lib/watcher_daemon.sh" "$interval" \
+  # Spawn WITHOUT CLAUDE_CODE_SESSION_ID: the daemon outlives its session, and
+  # the liveness probe in common.sh (beams::_session_alive_local) looks for
+  # that variable under /proc — a daemon still carrying a dead session's id
+  # made the id look alive, which kept its name "busy" and blocked the next
+  # session's auto-bind (the /clear + restart-within-15-min misses). The daemon
+  # resolves its identity from the exported BEAMS_CONFIG_DIR and never needs
+  # the session id.
+  nohup env -u CLAUDE_CODE_SESSION_ID bash "$PLUGIN_ROOT/lib/watcher_daemon.sh" "$interval" \
     >> "$log_file" 2>&1 < /dev/null &
   local pid=$!
   disown 2>/dev/null || true

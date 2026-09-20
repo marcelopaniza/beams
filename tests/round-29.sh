@@ -30,6 +30,10 @@ mkdir -p "$XDG_CONFIG_HOME" "$HOME" "$CLAUDE_PROJECT_DIR"
 unset CLAUDE_CODE_SESSION_ID BEAMS_CONFIG_DIR
 export BEAMS_NOTIFIER_CMD=true        # no real desktop notifications
 export BEAMS_DISABLE_WATCH_ON_BOOT=1  # positive cases unset this per-call
+# Leases now record the holder's Claude process ($CLAUDE_PID); inside a real
+# Claude session every fake session here would share that pid and read as
+# "mine". Drop it so the lease assertions see distinct sessions.
+unset CLAUDE_PID
 SHARED="$TMP/share"; mkdir -p "$SHARED"
 
 red()    { printf '\033[31m%s\033[0m\n' "$*"; }

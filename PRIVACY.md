@@ -16,6 +16,7 @@
 Everything in `$BEAMS_CONFIG_DIR` (default `~/.config/beams/`):
 
 - Your **Ed25519 private key** (`identity.key`, mode `0600`) — never transmitted, never copied to the shared folder.
+- Your **session inbox token** (`inbox.json`, mode `0600`, same folder — the native real-time doorbell) — never copied to the shared folder; the doorbell post itself stays on your machine's local per-session socket and never touches the network.
 - Your **session UUID** and local config (shared folder path, friendly name).
 - **Read cursors** — which messages this session has already seen.
 

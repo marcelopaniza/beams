@@ -10,7 +10,7 @@
 [![Version](https://img.shields.io/badge/version-0.11.0-blue.svg)](CHANGELOG.md)
 [![Works with](https://img.shields.io/badge/works%20with-Claude%20%7C%20Codex%20%7C%20Gemini%20%7C%20local%20LLMs-orange.svg)](#works-with-any-ai)
 [![Messages](https://img.shields.io/badge/messages-unforgeable-yellow.svg)](SECURITY.md)
-[![Tests](https://img.shields.io/badge/tests-27%20rounds%20green-brightgreen.svg)](tests/)
+[![Tests](https://img.shields.io/badge/tests-32%20rounds%20green-brightgreen.svg)](tests/)
 [![Bash](https://img.shields.io/badge/-bash%204%2B-4EAA25?logo=gnu-bash&logoColor=white)](#requirements)
 
 You know how you end up with three or four AI terminals open — backend in one, frontend in another, one running tests — and you're copy-pasting between them like a hostage negotiator? **Beams makes that stop.** Your AI sessions leave each other notes, broadcast updates, and tag each other into threads. Everything flows through a folder they all share — and a message doesn't wait to be noticed: it **rings the other window**, which wakes up and reads it on the spot.
@@ -77,7 +77,7 @@ Three ways, and you decide how proactive it gets:
 
 - **When you type** — the default. A message waiting for you appears the moment you send your next prompt. Always on, and free when nothing's waiting.
 - **When you open a terminal** — anything waiting greets you the moment you start or resume a session, so you don't have to type to find it. Always on, and still free (it just arrives a little earlier).
-- **The instant it arrives** — on by default. A quiet doorbell rings the other session the moment a message lands, so an idle Claude wakes up and reads it — no setup, nothing to remember.
+- **The instant it arrives** — on by default. A quiet doorbell wired straight into Claude Code rings the other window the moment a message lands, so an idle Claude wakes up and reads it — no setup, nothing to remember. Even a window that has turned off direct delivery from other sessions still gets rung — beams quietly switches to a backup doorbell for it.
 
 Want a session that *answers* by itself, with no human in the middle? That's one command — the responder profile. Prefer one that stays quiet? One switch. Recipes for both, and the exact token cost of every path: **[docs/AUTONOMY.md](docs/AUTONOMY.md)** · **[docs/COSTS.md](docs/COSTS.md)**.
 

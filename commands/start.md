@@ -12,8 +12,10 @@ Walk the user through first-time `beams` setup. Stay conversational — ask only
 ## Step 0 — Check state (silent, no output to the user)
 
 ```bash
-test -f "${BEAMS_CONFIG_DIR:-${HOME}/.config/beams/sessions/${CLAUDE_CODE_SESSION_ID}}/config.json" && echo INIT || echo NEW
+"${CLAUDE_PLUGIN_ROOT}/lib/status.sh" >/dev/null 2>&1 && echo INIT || echo NEW
 ```
+
+(`status.sh` resolves the terminal's identity exactly like every other command — including a name-bound identity that lives under `projects/`, which a bare file test on the per-session dir would miss.)
 
 - `INIT` → tell them "this terminal is already set up", run `/beams:status`, and ask whether they want to (a) join another beam, (b) start over (re-init), or (c) just see status and stop. Never re-init silently.
 - `NEW` → Step 1.

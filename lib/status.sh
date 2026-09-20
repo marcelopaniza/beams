@@ -47,10 +47,27 @@ else
     printf '  bound:        (unbound — run /beams:name <name> to bind this terminal)\n'
   fi
 fi
-# Real-time doorbell: ground truth via the open-reader probe — an armed
-# Monitor's `tail -F` holds wake.log open; nothing else does.
+# Real-time doorbell: the native transport when this session published an inbox
+# pointer whose socket is still there (the watcher posts wake batches into it and
+# the harness starts the turn — nothing for the model to arm). Otherwise ground
+# truth via the open-reader probe — an armed Monitor's `tail -F` holds wake.log
+# open; nothing else does.
+inbox_sock=$(beams::inbox_socket || true)
 reader=$(beams::doorbell_reader || true)
-if [ -n "$reader" ]; then
+if [ -n "$inbox_sock" ]; then
+  # The native transport is only half the chain: the watcher daemon is what
+  # posts into the socket, so native with no daemon rings nothing. Same pid-file
+  # validation as lib/watch.sh's is_alive — the file sits in a same-UID-writable
+  # dir, so a planted "-1"/"0" must never reach kill.
+  wpid=$(cat "$(beams::state_dir)/watcher.pid" 2>/dev/null || echo '')
+  case "$wpid" in ''|*[!0-9]*) wpid='' ;; esac
+  if [ -n "$wpid" ] && ! kill -0 "$wpid" 2>/dev/null; then wpid=''; fi
+  if [ -n "$wpid" ]; then
+    printf '  doorbell:     native (session inbox socket %s; watcher pid %s)\n' "$inbox_sock" "$wpid"
+  else
+    printf '  doorbell:     native transport ready, but the watcher is NOT running — run /beams:watch start\n'
+  fi
+elif [ -n "$reader" ]; then
   printf '  doorbell:     armed (wake.log reader pid %s)\n' "$reader"
 elif [ -n "$cc_sid" ]; then
   printf '  doorbell:     NOT armed — run /beams:name %s (or /beams:join <beam>) to re-offer the arm instruction\n' "$([ "$name" != '(unset)' ] && printf '%s' "$name" || printf '<name>')"

@@ -33,6 +33,10 @@ export XDG_CONFIG_HOME="$TMP/xdg"          # sandbox the whole ~/.config/beams t
 export HOME="$TMP/home"                     # keep legacy-config detection inert
 mkdir -p "$XDG_CONFIG_HOME" "$HOME"
 export BEAMS_DISABLE_WATCH_ON_BOOT=1        # never spawn real daemons in the test
+# Leases now record the holder's Claude process ($CLAUDE_PID); inside a real
+# Claude session every fake session here would share that pid and read as
+# "mine". Drop it so the lease assertions see distinct sessions.
+unset CLAUDE_PID
 SHARED="$TMP/share"; mkdir -p "$SHARED"
 BASE="$XDG_CONFIG_HOME/beams"
 FAKE_TMUX="/tmp/fake-tmux-sock,4242,0"      # a stable, fake $TMUX (socket,serverpid,sess)

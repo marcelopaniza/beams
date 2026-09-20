@@ -45,6 +45,10 @@ mkdir -p "$HOME" "$XDG_CONFIG_HOME" "$CLAUDE_PROJECT_DIR"
 # subtests don't spawn notifier daemons (or fire real notify-send popups);
 # subtest 8 re-enables it for the one invocation that tests the autostart.
 export BEAMS_DISABLE_WATCH_ON_BOOT=1
+# Leases now record the holder's Claude process ($CLAUDE_PID); inside a real
+# Claude session every fake session here would share that pid and read as
+# "mine". Drop it so the lease assertions see distinct sessions.
+unset CLAUDE_PID
 SHARED="$TMPDIR/share"
 CFG_A="$TMPDIR/cfg-a"        # alice — recipient, runs the hooks
 CFG_B="$TMPDIR/cfg-b"        # bob   — sender

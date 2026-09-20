@@ -42,13 +42,47 @@ cat >/dev/null 2>&1 || true
   command -v jq    >/dev/null 2>&1 || exit 0
   command -v find  >/dev/null 2>&1 || exit 0
 
-  # Resolve config dir the same way common.sh does (explicit override beats
-  # global default). We can't source common.sh without paying its startup
-  # cost, so reproduce the minimum needed.
-  beams_config_dir="${BEAMS_CONFIG_DIR:-${XDG_CONFIG_HOME:-$HOME/.config}/beams}"
+  # Resolve the config dir the way common.sh does — explicit override, else
+  # the session's bound identity (sessions/<id>/bound + bound_project →
+  # projects/<p>/identities/<name>), else the session's own scratch dir —
+  # without paying common.sh's startup cost. Previously this defaulted to the
+  # LEGACY single-config path (~/.config/beams/config.json), which a bound
+  # identity never has, so the fast path below never engaged (every prompt ran
+  # the full check.sh) — and, had a legacy config existed, its beam list would
+  # have driven the cache and silently skipped the bound identity's messages.
+  _bsid="${CLAUDE_CODE_SESSION_ID:-}"
+  _base="${XDG_CONFIG_HOME:-$HOME/.config}/beams"
+  beams_config_dir=""
+  if [ -n "${BEAMS_CONFIG_DIR:-}" ]; then
+    beams_config_dir="$BEAMS_CONFIG_DIR"
+  elif [ -n "$_bsid" ]; then
+    _sdir="$_base/sessions/$_bsid"
+    beams_config_dir="$_sdir"
+    if [ -f "$_sdir/bound" ] && [ ! -L "$_sdir/bound" ]; then
+      _bname=$(cat "$_sdir/bound" 2>/dev/null) || _bname=""
+      _bproj=$(cat "$_sdir/bound_project" 2>/dev/null) || _bproj=""
+      # Identity keys are already sanitised by beams::_safe_key; project keys
+      # are flattened absolute paths and therefore START with a dash
+      # ("-mnt-data-beams"), so only guard against escaping the tree.
+      case "$_bname" in ''|*/*|.|..|.*|-*) _bname="" ;; esac
+      case "$_bproj" in ''|*/*|.|..)      _bproj="" ;; esac
+      if [ -n "$_bname" ] && [ -n "$_bproj" ] \
+         && [ -f "$_base/projects/$_bproj/identities/$_bname/config.json" ]; then
+        beams_config_dir="$_base/projects/$_bproj/identities/$_bname"
+      fi
+    fi
+  fi
   cfg="$beams_config_dir/config.json"
   state_dir="$beams_config_dir/state"
   stash="$state_dir/hook-mtime-stash"
+  # A bounded check.sh run (delivery cap / time budget) leaves this marker: it
+  # advanced only our own cursor files, so no beam directory mtime moved and the
+  # fast path below would report "nothing changed" on every following prompt —
+  # the rest of the backlog would then sit there until the lease guard happened
+  # to force a slow path (and an identity with no lease.json would never drain
+  # at all). Take the slow path while the marker exists; check.sh removes it on
+  # the run that finally drains everything.
+  partial="$state_dir/partial-delivery"
 
   # One-shot: a just-completed /beams:name or /beams:join leaves a marker so we
   # set the Claude Code session title to the new identity on THIS next prompt (a
@@ -56,7 +90,6 @@ cat >/dev/null 2>&1 || true
   # present only on the prompt right after a bind. When set, we skip the fast
   # path below so the title actually gets emitted.
   pending_title=""
-  _bsid="${CLAUDE_CODE_SESSION_ID:-}"
   if [ -n "$_bsid" ]; then
     _ptf="${XDG_CONFIG_HOME:-$HOME/.config}/beams/sessions/$_bsid/title_pending"
     if [ -f "$_ptf" ] && [ ! -L "$_ptf" ]; then
@@ -77,7 +110,17 @@ cat >/dev/null 2>&1 || true
     state_dir_safe=0
   fi
 
-  if [ -z "$pending_title" ] && [ -r "$cfg" ] && command -v stat >/dev/null 2>&1 && [ "$state_dir_safe" = "1" ]; then
+  # The fast path also skips check.sh's lease heartbeat, so take it only while
+  # the lease was refreshed recently (< 5 min); otherwise run the slow path,
+  # which refreshes it. Keeps an active session's name from going stale.
+  lease_fresh=1
+  if [ -n "$beams_config_dir" ] && [ -f "$beams_config_dir/lease.json" ] && command -v stat >/dev/null 2>&1; then
+    _lm=$(stat -c %Y "$beams_config_dir/lease.json" 2>/dev/null || echo 0)
+    [ $(( $(date +%s) - _lm )) -lt 300 ] || lease_fresh=0
+  fi
+
+  if [ -z "$pending_title" ] && [ -n "$beams_config_dir" ] && [ -r "$cfg" ] && [ "$lease_fresh" = 1 ] \
+     && [ ! -f "$partial" ] && command -v stat >/dev/null 2>&1 && [ "$state_dir_safe" = "1" ]; then
     cfg_mtime=$(stat -c %Y "$cfg" 2>/dev/null || echo 0)
 
     # Refuse to read the stash if it's a symlink (peer-planted redirect).
@@ -169,7 +212,7 @@ cat >/dev/null 2>&1 || true
   # too). Capture mtimes AFTER check.sh so any messages it advanced past
   # are reflected. Best-effort — failures here just trigger one extra slow
   # path next time.
-  if [ -r "$cfg" ] && command -v stat >/dev/null 2>&1 && [ "$state_dir_safe" = "1" ]; then
+  if [ -n "$beams_config_dir" ] && [ -r "$cfg" ] && command -v stat >/dev/null 2>&1 && [ "$state_dir_safe" = "1" ]; then
     cfg_mtime=$(stat -c %Y "$cfg" 2>/dev/null || echo 0)
     parsed=$(jq -r '.shared_path // "", "---SEP---", (.beams[]? // empty)' \
                 "$cfg" 2>/dev/null || true)
@@ -184,6 +227,15 @@ cat >/dev/null 2>&1 || true
         tmp_stash=$(mktemp "$state_dir/hook-mtime-stash.XXXXXX" 2>/dev/null) \
           || tmp_stash=""
         if [ -n "$tmp_stash" ]; then
+          # mtimes are compared at SECOND granularity. A snapshot taken in the
+          # same second a directory (or the config) was last modified is "hot":
+          # a message landing later in that same second would leave the mtime
+          # equal to the snapshot and the fast path would skip it until the
+          # next change. Refuse to promote such a snapshot (\`hot=1\`) — the
+          # next prompt takes the slow path and snapshots again.
+          _now=$(date +%s 2>/dev/null || echo 0)
+          hot=0
+          [ "$cfg_mtime" -ge "$_now" ] 2>/dev/null && hot=1
           {
             printf 'cfg=%s\n'    "$cfg_mtime"
             printf 'shared=%s\n' "$shared"
@@ -192,14 +244,16 @@ cat >/dev/null 2>&1 || true
                   [ -n "$b" ] || continue
                   m=$(stat -c %Y "$shared/beams/$b/messages" 2>/dev/null || echo NA)
                   printf 'b=%s=%s\n' "$b" "$m"
+                  [ "$m" -ge "$_now" ] 2>/dev/null && printf 'hot=1\n'
                 done
           } > "$tmp_stash" 2>/dev/null
+          grep -q '^hot=1' "$tmp_stash" 2>/dev/null && hot=1
           # Validate at least one b= line landed before promoting. Under
           # pipefail with stderr suppressed, a non-zero exit from sed/tail
           # would otherwise leave a stash with only cfg=/shared= lines and
           # zero beams — which the fast path treats as "nothing to check"
           # and silently drops all real messages until config changes.
-          if grep -q '^b=' "$tmp_stash" 2>/dev/null; then
+          if [ "$hot" = 0 ] && grep -q '^b=' "$tmp_stash" 2>/dev/null; then
             mv "$tmp_stash" "$stash" 2>/dev/null || rm -f "$tmp_stash" 2>/dev/null
           else
             rm -f "$tmp_stash" 2>/dev/null

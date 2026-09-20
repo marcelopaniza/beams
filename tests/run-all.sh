@@ -19,10 +19,18 @@ trap 'rm -rf "$XDG_CONFIG_HOME"' EXIT
 # (join/name/init) must not spawn real watchers inside rounds that aren't
 # testing it. Rounds that ARE (28, 29) re-enable it in their own subshells.
 export BEAMS_DISABLE_WATCH_ON_BOOT=1
+# Leases record the holder's Claude process ($CLAUDE_PID). When the suite runs
+# inside a Claude session every fake session would share that pid and read as
+# the same holder — drop it so lease assertions see distinct sessions.
+unset CLAUDE_PID
+# Same reasoning for the session inbox socket: inside a Claude session these name
+# the REAL conversation's inbox, and a round that publishes a pointer (the native
+# doorbell transport) would post its test wakes into the user's live session.
+unset CLAUDE_CODE_MESSAGING_SOCKET CLAUDE_CODE_MESSAGING_TOKEN
 ROUNDS=("$@")
 # 21 and 27 tested the retired channel-server transport (removed in 0.11.0 —
 # the Monitor wake-file doorbell replaced it; round 28 covers that).
-[ "${#ROUNDS[@]}" -eq 0 ] && ROUNDS=(1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 22 23 24 25 26 28 29)
+[ "${#ROUNDS[@]}" -eq 0 ] && ROUNDS=(1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 22 23 24 25 26 28 29 30 31 32 33 34)
 
 red()   { printf '\033[31m%s\033[0m\n' "$*"; }
 green() { printf '\033[32m%s\033[0m\n' "$*"; }

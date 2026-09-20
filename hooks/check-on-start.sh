@@ -11,10 +11,14 @@
 # armed with the wake-file hook (lib/on-message.sh) — so EVERY session gets
 # desktop notifications AND the flag-free real-time doorbell without the user
 # remembering `/beams:watch start`. The daemon is zero-token (pure polling);
-# the only cost is one background process. We additionally emit an
-# additionalContext instruction asking the session to arm a persistent Monitor
-# on the wake file — that monitor is what turns an appended line into a wake
-# of an idle session (a hook can't start a model tool; it can only ask).
+# the only cost is one background process.
+#
+# Two doorbell transports, picked here: this hook publishes the session's inbox
+# pointer (inbox.json), and when that works the daemon posts each wake batch
+# straight into the session's own socket — the harness starts the turn, so we
+# emit NO instruction at all. On a harness that binds no such socket we fall
+# back to the wake file plus an additionalContext instruction asking the session
+# to arm a Monitor on it (a hook can't start a model tool; it can only ask).
 #
 # A missing config (a terminal that never ran /beams:init) is normally a silent
 # no-op so beams stays invisible to non-users — EXCEPT when this project has
@@ -26,8 +30,10 @@
 
 set -uo pipefail
 
-# Capture the SessionStart JSON; we only consume .source (startup | resume |
-# clear | compact), to decide whether to re-emit the doorbell-arm instruction.
+# Drain the SessionStart JSON (source: startup | resume | clear | compact |
+# fork). The doorbell re-offer is gated on the open-reader probe, not on the
+# source — the source is read only as the fallback for a host where no probe
+# method exists at all (see the wake_note block below).
 __hook_in=$(cat 2>/dev/null) || __hook_in=""
 
 # Be paranoid: a misconfigured hook must never break the user's session.
@@ -53,16 +59,23 @@ __hook_in=$(cat 2>/dev/null) || __hook_in=""
     [ -n "$idnames" ] || exit 0          # no identities → not a beams project
 
     # Identities this terminal could bind right now: free, or already leased by us.
-    bindable=()
+    # "mine" for an UNBOUND session means the lease names THIS Claude process
+    # (claude_pid) under a different session id — i.e. a /clear rotated the id
+    # in the terminal that holds the name. That is a certain match, even when
+    # the project has several identities.
+    bindable=(); mine=()
     while IFS= read -r nm; do
       [ -n "$nm" ] || continue
       case "$(beams::lease_state "$(beams::identities_dir)/$nm" 2>/dev/null)" in
-        free|mine) bindable+=("$nm") ;;
+        free) bindable+=("$nm") ;;
+        mine) bindable+=("$nm"); mine+=("$nm") ;;
       esac
     done <<< "$idnames"
 
     cand=""
-    if [ "${#bindable[@]}" -eq 0 ]; then
+    if [ "${#mine[@]}" -eq 1 ]; then
+      cand="${mine[0]}"                  # same Claude process (post-/clear) → certain
+    elif [ "${#bindable[@]}" -eq 0 ]; then
       exit 0                             # all busy (or none) → silent, never steal
     elif [ "${#bindable[@]}" -eq 1 ]; then
       cand="${bindable[0]}"              # unambiguous → silent auto-bind (as before)
@@ -107,6 +120,19 @@ __hook_in=$(cat 2>/dev/null) || __hook_in=""
   # daemon we may start next won't re-notify messages we just surfaced at boot.
   out=$("$root/lib/check.sh" --hook SessionStart 2>/dev/null) || out=""
 
+  # Native doorbell transport: publish this session's inbox socket + token for
+  # the watcher daemon to post into (beams::inbox_publish). Done BEFORE the
+  # watcher (re)start so the daemon's very first poll already finds a current
+  # pointer, and OUTSIDE the watch_on_boot gate ON PURPOSE: a session that opted
+  # out still gets a current pointer, which costs nothing and means a watcher
+  # started later — by hand here (`/beams:watch start` publishes too) or by
+  # another session — can ring this one. Non-zero = no native transport for this
+  # session: no inbox socket (older Claude Code, a cross-CLI shell), or a
+  # receiver whose crossSessionInbound setting refuses/holds peer messages →
+  # either way we stay on the Monitor fallback below.
+  __native=0
+  beams::inbox_publish 2>/dev/null && __native=1
+
   # Default-on: bring up the notifier daemon on boot so every session gets
   # desktop notifications for new beams. Opt out per-session with
   # react.watch_on_boot:false, or globally with BEAMS_DISABLE_WATCH_ON_BOOT=1
@@ -150,23 +176,37 @@ __hook_in=$(cat 2>/dev/null) || __hook_in=""
     __doorbell=1
   fi
 
-  # Ask the session to arm the doorbell Monitor. Emitted only for a FRESH
-  # process — source startup/resume (or absent, on older harnesses) — where no
-  # monitor can pre-exist. clear and compact keep the process (and its
-  # monitors) alive, and the model has no reliable probe for a live monitor
-  # (TaskList does not list Monitor tasks — verified live), so re-emitting
-  # there would breed duplicate doorbells ringing double per message: skip both.
+  # Ask the session to arm the doorbell Monitor — the FALLBACK transport, so
+  # only when this session has no inbox socket of its own (__native above). With
+  # one, the watcher posts the wake straight into the session and the harness
+  # starts the turn itself: nothing to arm, and nothing to re-arm every 30
+  # minutes. Suppressed also when something already
+  # tails wake.log (beams::doorbell_reader: fuser, lsof, or a /proc fd scan). An
+  # open reader IS a live doorbell, whether armed earlier in this process (a
+  # /clear or compact keeps the process and its monitors) or not; instructing
+  # again would arm a second monitor that rings every message twice. The probe
+  # replaces the old `source`-based rule (skip on clear/compact): the harness now
+  # ends every monitor after at most 30 minutes, so by the time a compaction
+  # fires the doorbell is usually gone — and the instruction that told the model
+  # to re-arm it is exactly what the compaction just dropped from context.
   wake_note=""
-  if [ "${__doorbell:-}" = "1" ]; then
-    __hook_src=$(printf '%s' "${__hook_in:-}" | jq -r '.source // empty' 2>/dev/null) || __hook_src=""
-    case "$__hook_src" in
-      clear|compact) : ;;
-      *)
-        # Exact text lives in common.sh (beams::doorbell_instruction) — shared
-        # with the mid-session arm (beams::doorbell_autostart), so the two
-        # emitters can't drift.
-        wake_note=$(beams::doorbell_instruction)
-        ;;
+  if [ "${__native:-0}" != "1" ] && [ "${__doorbell:-}" = "1" ] \
+     && [ -z "$(beams::doorbell_reader 2>/dev/null)" ]; then
+    # "No reader" only means "nothing armed" where a probe method exists. With
+    # none (no fuser, no lsof, no readable /proc) an armed monitor is invisible,
+    # and the empty probe would re-offer on every clear/compact and duplicate the
+    # doorbell — so fall back to the pre-probe rule there and stay silent on
+    # exactly those two sources, which keep the process and its monitors alive.
+    __src=""
+    if ! beams::doorbell_probe_available; then
+      __src=$(printf '%s' "$__hook_in" | jq -r '.source // empty' 2>/dev/null) || __src=""
+    fi
+    case "$__src" in
+      clear|compact) ;;
+      # Exact text lives in common.sh (beams::doorbell_instruction) — shared
+      # with the mid-session arm (beams::doorbell_autostart), so the two
+      # emitters can't drift.
+      *) wake_note=$(beams::doorbell_instruction) ;;
     esac
   fi
 

@@ -15,7 +15,7 @@ Report the output verbatim. If the user is starting the watcher for the first ti
 - It runs detached; it survives this terminal closing.
 - It uses a separate "notification cursor", so messages will STILL appear inside Claude on the next user prompt — notifications and in-conversation delivery are independent.
 - On NFS / Syncthing / Dropbox the polling interval (default 5s) is the only way to detect remote writes — inotify cannot see other machines' changes.
-- Session start (re)arms it automatically with the doorbell hook (`lib/on-message.sh`) — that is how a new message wakes an idle Claude session in real time.
+- Session start (re)arms it automatically with the doorbell hook (`lib/on-message.sh`) — on current Claude Code the daemon also posts a short wake summary (how many messages, and who from — never message bodies) straight into this session's own inbox after each poll, which is what actually wakes an idle Claude session in real time; the hook and wake.log remain the fallback on older harnesses. Running `start` or `restart` yourself does the same for this session — it's also how to turn that on if you'd turned off the boot watcher, or set up this session's identity after it started.
 - Stop it with `/beams:watch stop` when no longer needed.
 
 If the user passed `--on-message <shell-cmd>`, also mention that:

@@ -18,6 +18,10 @@ mkdir -p "$XDG_CONFIG_HOME" "$HOME" "$CLAUDE_PROJECT_DIR"
 # The watcher auto-arms on boot by default now; this round tests identity/binding,
 # not the watcher, so suppress autostart to keep `boot` from spawning daemons.
 export BEAMS_DISABLE_WATCH_ON_BOOT=1
+# Leases now record the holder's Claude process ($CLAUDE_PID); inside a real
+# Claude session every fake session here would share that pid and read as
+# "mine". Drop it so the lease assertions see distinct sessions.
+unset CLAUDE_PID
 SHARED="$TMP/share"; mkdir -p "$SHARED"
 BASE="$XDG_CONFIG_HOME/beams"
 PKEY=$(printf '%s' "$CLAUDE_PROJECT_DIR" | sed 's,/,-,g')

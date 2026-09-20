@@ -9,7 +9,7 @@ Clone the repo and run the smoke tests:
 ```
 git clone https://github.com/marcelopaniza/beams
 cd beams
-bash tests/run-all.sh        # 9 rounds, ~135 s
+bash tests/run-all.sh        # 32 rounds, ~135 s
 ```
 
 Tests run against a temporary share directory in `/tmp` and clean up after themselves. You'll need: `bash` 4.0+, `jq`, `openssl` 1.1.1+, `find`, `awk`, `sed`.
@@ -19,6 +19,8 @@ Run a subset:
 ```
 bash tests/run-all.sh 3 9    # only rounds 3 and 9
 ```
+
+Running a single round directly (`bash tests/round-N.sh`, bypassing `run-all.sh`) inside a live Claude Code session needs `unset CLAUDE_PID CLAUDE_CODE_MESSAGING_SOCKET CLAUDE_CODE_MESSAGING_TOKEN` first (`run-all.sh` does this for the whole suite) — otherwise a test watcher can pick up this session's real identity and post test traffic into your own conversation.
 
 ## Commit style
 

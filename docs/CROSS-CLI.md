@@ -157,7 +157,7 @@ DIRECTIVE
 
 Each flag choice:
 
-- **`BEAMS_CONFIG_DIR`** — pin the responder to its own identity so other shells / Claude sessions / cron jobs can't accidentally share its cursor.
+- **`BEAMS_CONFIG_DIR`** — pin the responder to its own identity so other shells / Claude sessions / cron jobs can't accidentally share its cursor. Run from inside a Claude session's Bash tool, this pin also stops the responder from capturing that session's own native doorbell socket (beams won't publish a pointer for an identity pinned this way) — the Claude session just stays on its Monitor fallback.
 - **`--interval 10`** — most "respond when asked" use cases don't need 5-second freshness. 10 s halves your file-stat load without humans noticing.
 - **`--max-fires-per-hour 12`** — sliding 1-hour cap. The default of 60 is for tight agent-to-agent task handoff; a responder agent that fires every 5 minutes is plenty for human-in-the-loop coordination, and the lower cap is a meaningful brake against a runaway sender.
 - **`--prompt "…"`** — overrides the built-in directive. The built-in is tuned for "agent-to-agent task handoff"; a responder agent wants stricter "stay silent unless needed" guidance.
@@ -190,7 +190,7 @@ If `beams-wrap` doesn't fit your invocation pattern — say you're building a cu
 bin/beams read --inject
 ```
 
-It returns the same text block `beams-wrap` reads internally: ASCII-fenced, no XML tags, no JSON. Advances both the delivery and notify cursors, silent when there's nothing new.
+It returns the same text block `beams-wrap` reads internally: ASCII-fenced, no XML tags, no JSON. Advances both the delivery and notify cursors, silent when there's nothing new. By default it drains the whole backlog in one call — no per-run cap, unlike the Claude-facing hook modes — since a generic model has no other chance to catch the rest; `--peek`'s read-only preview is unbounded the same way. Override either with `BEAMS_SCAN_BUDGET_SECS` / `BEAMS_DELIVERY_CAP` if you want a wrapped model capped per run.
 
 Each invocation embeds a per-run random 16-hex nonce on every boundary:
 

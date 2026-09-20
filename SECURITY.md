@@ -29,12 +29,13 @@ The full table is in the [README's "Identity & security" section](README.md#iden
 - **Path traversal via terminal-pane env vars (`TMUX_PANE` etc.)** → defended by sanitising the value and rejecting `.`, `..`, leading `-`, leading `.`, and `..` substrings.
 - **Read your messages off the share as another UNIX user** → defended by `umask 077` + beam-dir mode `0700`. Defends against accidental disclosure to other local users; does **not** defend against root, filesystem snapshots, or the share host operator.
 - **Replay** (drop an old signed message back onto the share) → partial: cursor prevents re-delivery to receivers who already saw it, but new subscribers will see replayed history. Sequence numbers are on the roadmap.
+- **A generic rider identity, pinned with `BEAMS_CONFIG_DIR` and driven from inside a Claude session's own Bash tool, capturing that session's native-doorbell socket** → defended: `beams::inbox_publish` refuses to publish unless the calling shell has a real Claude terminal id *and* no explicit `BEAMS_CONFIG_DIR` override, so a pinned identity's inherited socket env can never be published as that Claude session's own pointer — the Claude session simply stays on the Monitor fallback. `beams::inbox_forget` applies the same ownership check in reverse: it only ever removes a pointer this session published (matching session id, or matching Claude pid across a `/clear`), so a `--force` takeover's pointer survives the ousted session's `SessionEnd`.
 
 ## Out of scope
 
 - An insider with raw write access to the shared folder kicking/locking/transferring driver maliciously. The driver protocol is **cooperative** — defended at the social layer, not the technical one. Use filesystem ACLs if you need stronger guarantees.
 - **Encrypted message bodies.** Not implemented. Bodies are signed (authenticity, integrity) but not encrypted (confidentiality). Treat the beam like a logged group chat: do not send secrets on it.
-- A malicious local user with shell access on the machine. Ed25519 private keys live in `$BEAMS_CONFIG_DIR/identity.key` at mode `0600`. A user with sufficient privilege can read them. Treat them like SSH keys.
+- A malicious local user with shell access on the machine. Ed25519 private keys live in `$BEAMS_CONFIG_DIR/identity.key` at mode `0600`. A user with sufficient privilege can read them. Treat them like SSH keys. The native doorbell's session-inbox token sits at the same trust tier (`$BEAMS_CONFIG_DIR/inbox.json`, mode `0600`, next to `identity.key`), and the doorbell post itself stays on that local per-session Unix socket, never touching the shared folder or the network.
 
 ## Responsible disclosure preference
 

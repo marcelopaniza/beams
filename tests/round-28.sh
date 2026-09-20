@@ -12,11 +12,15 @@
 #   D. control chars stripped, >160-char preview capped, empty beam → no line
 #   E. a >1MB wake.log self-caps (truncate-then-append)
 #   F. SessionStart: truncates stale wake.log, restarts the watcher with the
-#      hook armed (on-message=ACTIVE), and emits the Monitor-arm instruction
+#      hook armed (on-message=ACTIVE), and emits the Monitor-arm instruction —
+#      with arguments the current Monitor tool accepts (no `persistent`; the
+#      30-minute deadline; re-arm on expiry; load via ToolSearch if deferred)
 #   F2. a responder-role config flips the instruction's reply clause to an
 #      autonomous-reply grant (still walled off from destructive asks)
-#   G. SessionStart with source=compact/clear → NO arm instruction (monitors
-#      survive in-process; TaskList can't probe them, so never re-instruct)
+#   G. SessionStart with source=compact/clear and NOTHING tailing wake.log →
+#      the instruction IS re-offered (monitors expire after 30 min, and a
+#      compaction drops the re-arm rule from context); with a live reader on
+#      wake.log (an armed doorbell) → suppressed, for every source
 #   H. BEAMS_DISABLE_WATCH_ON_BOOT=1 → no watcher, no arm instruction
 #   I. end to end: real send → watcher poll → dispatch → wake.log line
 
@@ -38,8 +42,10 @@ banner() { printf '\n\033[1;34m== %s ==\033[0m\n' "$*"; }
 fail()   { red "FAIL: $*"; exit 1; }
 pass()   { green "PASS: $*"; }
 
+TAIL_PID=""
 cleanup() {
   local f
+  [ -n "$TAIL_PID" ] && kill "$TAIL_PID" 2>/dev/null || true
   for f in "$XDG_CONFIG_HOME"/beams/projects/*/identities/*/state/*/watcher.pid \
            "$CFG_B"/state/*/watcher.pid; do
     [ -f "$f" ] && kill "$(cat "$f" 2>/dev/null)" 2>/dev/null || true
@@ -133,7 +139,10 @@ printf '%s' "$ctx" | grep -q  'beams doorbell'            || fail "arm instructi
 printf '%s' "$ctx" | grep -q  'Monitor'                   || fail "arm instruction does not name the Monitor tool"
 printf '%s' "$ctx" | grep -qF "$ALICE_CFG/wake.log"       || fail "arm instruction missing the wake.log path"
 printf '%s' "$ctx" | grep -qF "tail -n 0 -F"              || fail "arm instruction missing the tail command"
-printf '%s' "$ctx" | grep -q  'persistent: true'          || fail "arm instruction missing persistent: true"
+printf '%s' "$ctx" | grep -q  'persistent'                && fail "arm instruction still names the retired persistent flag (the Monitor tool rejects unknown fields)" || true
+printf '%s' "$ctx" | grep -q  'timeout_ms: 1800000'       || fail "arm instruction missing timeout_ms: 1800000 (the harness caps monitors at 30 minutes)"
+printf '%s' "$ctx" | grep -q  'arm it again'              || fail "arm instruction missing the re-arm-on-expiry rule"
+printf '%s' "$ctx" | grep -q  'ToolSearch'                || fail "arm instruction missing the deferred-tool (ToolSearch) hint"
 printf '%s' "$ctx" | grep -q  'only if this session'      || fail "default (non-responder) reply clause missing"
 [ ! -s "$ALICE_CFG/wake.log" ] || fail "stale wake.log was not truncated at session start"
 
@@ -168,17 +177,45 @@ jq 'del(.role)' "$ALICE_CFG/config.json" > "$ALICE_CFG/config.json.tmp" \
 pass "responder role grants autonomous replies (with the destructive-ask wall)"
 
 # ---------------------------------------------------------------------------
-banner "G. source=compact/clear → no arm instruction (monitors survive in-process)"
-for src in compact clear; do
+banner "G. compact/clear with no wake.log reader → re-offered; with a live reader → suppressed"
+boot_src() {   # boot_src <source> — echoes the hook's additionalContext
+  local out
   out=$( unset BEAMS_DISABLE_WATCH_ON_BOOT
          export CLAUDE_CODE_SESSION_ID=boot-sess CLAUDE_PLUGIN_ROOT="$PLUGIN"
-         printf '{"source":"%s"}' "$src" | bash "$PLUGIN/hooks/check-on-start.sh" 2>/dev/null ) || true
-  ctx=$(printf '%s' "$out" | jq -r '.hookSpecificOutput.additionalContext // empty' 2>/dev/null) || ctx=""
-  printf '%s' "$ctx" | grep -q 'beams doorbell' && fail "$src re-emitted the arm instruction" || true
-done
-pass "compact + clear: instruction suppressed (no duplicate doorbells)"
+         printf '{"source":"%s"}' "$1" | bash "$PLUGIN/hooks/check-on-start.sh" 2>/dev/null ) || true
+  printf '%s' "$out" | jq -r '.hookSpecificOutput.additionalContext // empty' 2>/dev/null || true
+}
+# The re-offer is gated on the open-reader probe: fuser, lsof, or the /proc fd
+# scan. Where one of the three exists, "nothing tails wake.log" is ground truth
+# and every source may re-offer; where NONE exists an armed monitor is invisible,
+# so the hook falls back to the pre-probe rule and must stay silent on
+# clear/compact — the two sources that keep the process and its monitors — or it
+# would arm a second doorbell that rings every message twice.
+if command -v fuser >/dev/null 2>&1 || command -v lsof >/dev/null 2>&1 || [ -r /proc/self/fd ]; then
+  for src in compact clear; do
+    printf '%s' "$(boot_src "$src")" | grep -q 'beams doorbell' \
+      || fail "$src with no live doorbell did not re-offer the arm instruction"
+  done
+  tail -n 0 -F "$ALICE_CFG/wake.log" >/dev/null 2>&1 &
+  TAIL_PID=$!
+  sleep 0.3   # let tail open the file
+  for src in startup compact clear; do
+    printf '%s' "$(boot_src "$src")" | grep -q 'beams doorbell' \
+      && fail "$src re-emitted the arm instruction despite a live wake.log reader" || true
+  done
+  kill "$TAIL_PID" 2>/dev/null || true; wait "$TAIL_PID" 2>/dev/null || true; TAIL_PID=""
+  pass "no reader → re-offered on compact/clear; live reader → suppressed on every source"
+else
+  for src in compact clear; do
+    printf '%s' "$(boot_src "$src")" | grep -q 'beams doorbell' \
+      && fail "$src re-offered the arm instruction on a host where a live monitor cannot be seen" || true
+  done
+  printf '%s' "$(boot_src startup)" | grep -q 'beams doorbell' \
+    || fail "startup did not offer the arm instruction with no probe method available"
+  pass "no probe method here → startup offers, clear/compact stay silent (no duplicate doorbell)"
+fi
 
-# G queued TWO async watcher bounces (compact + clear). Waiting for any one
+# G queued several async watcher bounces. Waiting for any one
 # new pid is raceable — a still-in-flight restart can spawn a daemon right
 # after our stop, which H would mis-read as "opt-out started a watcher".
 # Drain instead: keep stopping whatever live daemon appears until the
@@ -239,4 +276,4 @@ run_as "$ALICE_CFG" watch stop >/dev/null 2>&1 || true
 pass "real send produced a wake line within the poll window"
 
 green ""
-green "round-28 PASS: the wake-file doorbell appends sanitized one-line events; SessionStart truncates, re-arms the watcher, and instructs the Monitor; opt-outs stay silent; end-to-end send→wake works"
+green "round-28 PASS: the wake-file doorbell appends sanitized one-line events; SessionStart truncates, re-arms the watcher, and instructs a Monitor the current harness accepts (re-offered whenever nothing tails wake.log); opt-outs stay silent; end-to-end send→wake works"

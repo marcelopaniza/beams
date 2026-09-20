@@ -1,5 +1,5 @@
 {
-  "description": "beams plugin: proactive delivery of cross-terminal messages — pull-on-prompt (UserPromptSubmit), surface-on-boot (SessionStart), and opt-in active-session sustain (Stop)",
+  "description": "beams plugin: proactive delivery of cross-terminal messages — pull-on-prompt (UserPromptSubmit), surface-on-boot (SessionStart), opt-in active-session sustain (Stop), and lease release on exit (SessionEnd)",
   "hooks": {
     "UserPromptSubmit": [
       {
@@ -30,6 +30,17 @@
             "type": "command",
             "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/respond-on-stop.sh\"",
             "timeout": 10
+          }
+        ]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/session-end.sh\"",
+            "timeout": 5
           }
         ]
       }
