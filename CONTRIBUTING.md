@@ -9,7 +9,7 @@ Clone the repo and run the smoke tests:
 ```
 git clone https://github.com/marcelopaniza/beams
 cd beams
-bash tests/run-all.sh        # 32 rounds, ~135 s
+bash tests/run-all.sh        # 33 rounds, ~135 s
 ```
 
 Tests run against a temporary share directory in `/tmp` and clean up after themselves. You'll need: `bash` 4.0+, `jq`, `openssl` 1.1.1+, `find`, `awk`, `sed`.

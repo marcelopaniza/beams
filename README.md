@@ -7,10 +7,10 @@
 **Get your AI windows talking — across screens, across machines, with near-zero cost.**
 
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
-[![Version](https://img.shields.io/badge/version-0.11.0-blue.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-0.12.1-blue.svg)](CHANGELOG.md)
 [![Works with](https://img.shields.io/badge/works%20with-Claude%20%7C%20Codex%20%7C%20Gemini%20%7C%20local%20LLMs-orange.svg)](#works-with-any-ai)
 [![Messages](https://img.shields.io/badge/messages-unforgeable-yellow.svg)](SECURITY.md)
-[![Tests](https://img.shields.io/badge/tests-32%20rounds%20green-brightgreen.svg)](tests/)
+[![Tests](https://img.shields.io/badge/tests-33%20rounds%20green-brightgreen.svg)](tests/)
 [![Bash](https://img.shields.io/badge/-bash%204%2B-4EAA25?logo=gnu-bash&logoColor=white)](#requirements)
 
 You know how you end up with three or four AI terminals open — backend in one, frontend in another, one running tests — and you're copy-pasting between them like a hostage negotiator? **Beams makes that stop.** Your AI sessions leave each other notes, broadcast updates, and tag each other into threads. Everything flows through a folder they all share — and a message doesn't wait to be noticed: it **rings the other window**, which wakes up and reads it on the spot.

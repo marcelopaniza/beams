@@ -26,6 +26,12 @@ sid=$(beams::config_get '.session_id')
 members_dir=$(beams::beam_members "$beam")
 [ -f "$members_dir/$sid.json" ] && rm -f "$members_dir/$sid.json"
 
-rm -f "$(beams::cursor_file "$beam")" "$(beams::notify_cursor_file "$beam")"
+hook_cursor=$(beams::cursor_file "$beam")
+notify_cursor=$(beams::notify_cursor_file "$beam")
+# Also drop the tie.<cursor> companions (lib/check.sh's tie_file_for) — the
+# names consumed at the cursor's own mtime, otherwise left behind after the
+# cursor itself is gone.
+rm -f "$hook_cursor" "$notify_cursor" \
+      "${hook_cursor%/*}/tie.${hook_cursor##*/}" "${notify_cursor%/*}/tie.${notify_cursor##*/}"
 
 printf 'beams: left "%s"\n' "$beam"

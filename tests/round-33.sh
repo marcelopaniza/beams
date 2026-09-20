@@ -54,14 +54,35 @@ pass()   { green "PASS: $*"; }
 P_ALICE=""; P_BOB=""; P_CAROL=""
 SRV_ALICE=""; SRV_BOB=""; SRV_CAROL=""
 cleanup() {
-  local f p
+  local rc=$?          # the status that triggered the trap — a REAL failure
+                       # (any fail() above) has to survive this cleanup
+  local f p w i alive pids=""
   for p in "$SRV_ALICE" "$SRV_BOB" "$SRV_CAROL" "$P_ALICE" "$P_BOB" "$P_CAROL"; do
     [ -n "$p" ] && kill "$p" 2>/dev/null || true
   done
   for f in "$IDENT"/*/state/*/watcher.pid; do
-    [ -f "$f" ] && kill "$(cat "$f" 2>/dev/null)" 2>/dev/null || true
+    [ -f "$f" ] || continue
+    w=$(cat "$f" 2>/dev/null) || continue
+    [ -n "$w" ] || continue
+    kill "$w" 2>/dev/null || true
+    pids="$pids $w"
   done
-  rm -rf "$TMP"
+  # A watcher that has been signalled but has not exited yet can still write
+  # into state/<sid>/ while `rm -rf` walks it, and rm then dies with
+  # "Directory not empty" — which, as the trap's last command, used to fail
+  # the whole round after every assertion had already passed. Wait for the
+  # daemons to actually go (up to ~2s), SIGKILL any straggler, and never let
+  # the delete itself decide the exit status.
+  i=0
+  while [ "$i" -lt 20 ]; do
+    alive=0
+    for w in $pids; do kill -0 "$w" 2>/dev/null && alive=1; done
+    [ "$alive" -eq 0 ] && break
+    sleep 0.1; i=$((i + 1))
+  done
+  for w in $pids; do kill -0 "$w" 2>/dev/null && kill -9 "$w" 2>/dev/null || true; done
+  rm -rf "$TMP" 2>/dev/null || true
+  exit "$rc"
 }
 trap cleanup EXIT
 

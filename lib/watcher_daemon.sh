@@ -200,6 +200,9 @@ dispatch_on_message() {
 inbox_warned=""            # socket path we have already logged a fallback for
 inbox_batch_cap=20         # lines listed per summary; the rest become "+N more"
 inbox_field_cap=64         # chars per beam/sender name in a listed line
+inbox_post_min_gap=60      # seconds a drain (batch_n >= cap) must wait after
+                           # the last such full post before posting again
+inbox_last_post=""         # $SECONDS at the last full-batch post; empty until one lands
 
 inbox_field() {
   # One beam or sender name for the native summary, reduced to the identifier
@@ -216,6 +219,16 @@ inbox_field() {
 
 post_batch_to_inbox() {
   local n="$1" lines="$2" sock named reply text
+  # Drain cooldown: an identity coming back to a stale cursor against an
+  # 855-message backlog used to get one native post — one forced turn — per
+  # poll (43 in ~5 minutes at 20/poll). Only a batch that ITSELF hit the cap
+  # can be held back, and only while the last such full batch posted less
+  # than inbox_post_min_gap ago; a non-full batch (an ordinary conversation)
+  # always posts the same poll it lands in, exactly as before.
+  if [ "$n" -ge "$inbox_batch_cap" ] && [ -n "$inbox_last_post" ] \
+     && [ $((SECONDS - inbox_last_post)) -lt "$inbox_post_min_gap" ]; then
+    return 0
+  fi
   sock=$(beams::inbox_socket)
   if [ -z "$sock" ]; then
     # No pointer at all → nothing to fall back FROM (a cross-CLI identity, or a
@@ -237,6 +250,7 @@ post_batch_to_inbox() {
   if beams::inbox_post "$text"; then
     echo "[$(beams::now_iso)] inbox post ok n=$n"
     inbox_warned=""        # a working socket re-arms the one-shot warning
+    [ "$n" -ge "$inbox_batch_cap" ] && inbox_last_post=$SECONDS
   elif [ "$inbox_warned" != "$sock" ]; then
     echo "[$(beams::now_iso)] inbox socket gone/refused ($sock) — falling back to wake.log"
     inbox_warned="$sock"

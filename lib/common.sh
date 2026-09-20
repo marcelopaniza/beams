@@ -1269,7 +1269,12 @@ beams::extract_fm() {
   printf '%s\n' "$1" | awk 'BEGIN{n=0} /^---$/{n++; next} n==1{print} n>=2{exit}'
 }
 beams::extract_body() {
-  printf '%s\n' "$1" | awk 'BEGIN{n=0} /^---$/{n++; next} n>=2{print}'
+  # n>=2 is checked BEFORE the fence pattern, and `next` short-circuits it:
+  # once the front matter has closed, every remaining line prints verbatim,
+  # even one that is itself exactly '---' (a markdown rule, a pasted message
+  # dump, a fake frontmatter block) instead of being swallowed as a third
+  # fence. Before the front matter closes, `---` lines are still counted.
+  printf '%s\n' "$1" | awk 'BEGIN{n=0} n>=2{print; next} /^---$/{n++}'
 }
 
 # ── cryptographic identity (Ed25519) ────────────────────────────────────────

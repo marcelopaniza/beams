@@ -570,7 +570,7 @@ if [ "$mode" = "--notify" ]; then
     content="${match_contents[$i]}"
     fm=$(beams::extract_fm "$content"); body=$(beams::extract_body "$content")
     fn=$(beams::fm_field "$fm" from_name); [ -n "$fn" ] || fn=$(beams::fm_field "$fm" from)
-    fn=$(printf '%s' "$fn" | LC_ALL=C tr -d '\000-\037\177')
+    fn=$(printf '%s' "$fn" | LC_ALL=C tr -d '\000-\037\177' | cut -c1-64)
     preview=$(printf '%s' "$body" | tr '\n' ' ' \
               | LC_ALL=C tr -d '\000-\011\013-\037\177' | cut -c1-120)
     printf '%s\t%s\t%s\n' "$beam" "$fn" "$preview"
